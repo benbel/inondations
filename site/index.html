@@ -17,7 +17,7 @@ h1 { font-size: 19px; font-weight: normal; margin: 0 0 8px }
 .phrase { margin: 0 }
 select { appearance: none; -webkit-appearance: none; font: inherit; color: #9E1B1B;
          background: none; border: 0; border-bottom: 1.5px solid #9E1B1B; border-radius: 0;
-         padding: 0 18px 0 4px; cursor: pointer }
+         padding: 0 18px 0 4px; cursor: pointer; max-width: 100% }
 select:hover { background: rgba(158, 27, 27, 0.08) }
 select:focus-visible { outline: 2px solid #9E1B1B; outline-offset: 2px }
 .choix { position: relative; white-space: nowrap }
@@ -25,11 +25,12 @@ select:focus-visible { outline: 2px solid #9E1B1B; outline-offset: 2px }
                 pointer-events: none; font-size: 12px; line-height: 1.9 }
 .mesure { position: absolute; visibility: hidden; white-space: pre }
 .nombre { font-variant-numeric: lining-nums }
-#carte { height: 78vh; background: #b8c8d2 }
+#carte { height: 76vh; background: #eceae4 }
 .legende { font-size: 13px; margin: 8px 0 0 }
 .legende i { display: inline-block; width: 9px; height: 9px; margin: 0 5px 0 0; vertical-align: 0 }
+.legende i.rond { border-radius: 50% }
 .legende span { margin-right: 16px }
-.grille { display: grid; grid-template-columns: repeat(4, auto); justify-content: start; row-gap: 6px }
+.note { color: #555 }
 @media (max-width: 820px) {
   body { padding: 16px }
   #carte { height: 62vh }
@@ -38,26 +39,9 @@ select:focus-visible { outline: 2px solid #9E1B1B; outline-offset: 2px }
 </head>
 <body>
 <header>
-  <h1>Zones inondables de <span class="choix"><select id="territoire" title="Choisir le territoire">
-    <option value="saint_omer">Saint-Omer</option>
-    <option value="ales">Alès</option>
-    <option value="saint_malo">Saint-Malo et de la baie du Mont-Saint-Michel</option>
-    <option value="aude">l'Aude, de Carcassonne à Trèbes</option>
-    <option value="calais">Calais</option>
-    <option value="delta_rhone">Arles et du delta du Rhône</option>
-    <option value="roya_vesubie">la Roya et de la Vésubie</option>
-    <option value="boucle_marne">la boucle de la Marne</option>
-    <option value="paris">Paris</option>
-    <option value="lyon">Lyon et Villeurbanne</option>
-    <option value="marseille">Marseille et Aubagne</option>
-    <option value="toulouse">Toulouse</option>
-    <option value="bordeaux">Bordeaux</option>
-    <option value="grenoble">Grenoble</option>
-    <option value="nimes">Nîmes</option>
-    <option value="bastia">Bastia</option>
-  </select></span></h1>
+  <h1>Zones inondables en France métropolitaine</h1>
   <p class="phrase">Pour une crue <span class="choix"><select id="crue" title="Choisir la crue"></select></span>,
-  <span class="nombre" id="nombre"></span> bâtiments sur
+  <span id="lieu">dans la zone affichée</span>, <span class="nombre" id="nombre"></span> bâtiments sur
   <span class="nombre" id="total"></span> seraient en zone inondable, avec
   <span class="nombre" id="logements"></span> logements,
   <span class="nombre" id="habitants"></span> habitants en 2021 et une valeur estimée de
@@ -65,74 +49,87 @@ select:focus-visible { outline: 2px solid #9E1B1B; outline-offset: 2px }
 </header>
 <main>
   <div id="carte"></div>
-  <div class="legende grille" id="legende">
-    <span>Crue :</span>
-    <span id="batiments">Bâtiments :</span>
-    <span><i style="background: #001a6e"></i>en zone inondable</span>
-    <span><i style="background: #f4ecdc"></i>logements hors zone inondable</span>
-    <span><i style="background: #d6c3a0"></i>autres bâtiments hors zone inondable</span>
-  </div>
-  <p class="legende">Sources : IGN (CoSIA 2021-2023, LiDAR HD, BD TOPO, Admin Express), Géorisques (TRI 2020), JRC (cartes d'aléa), Insee (Filosofi), DGFiP (DVF).</p>
+  <p class="legende">
+    <span><i class="rond" style="background: rgba(0, 26, 110, 0.55)"></i>habitants en zone inondable, par commune (vue d'ensemble)</span>
+    <span><i style="background: #5877c5"></i>zone inondable (à partir du zoom 11)</span>
+    <span><i style="background: #001a6e"></i>bâtiment en zone inondable (à partir du zoom 14)</span>
+  </p>
+  <p class="legende note" id="avertissement"></p>
+  <p class="legende note">Sources : IGN (Plan IGN, BD TOPO, Admin Express, estompage LiDAR HD),
+  Géorisques (TRI, EAIP), JRC (cartes d'aléa européennes), Insee (Filosofi 2021), DGFiP (DVF 2021-2025).</p>
+  <p class="legende note">La valeur n'est pas estimée en Moselle, dans le Bas-Rhin et le Haut-Rhin, absents de DVF.</p>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js"></script>
 <script>
 const nombres = new Intl.NumberFormat("fr-FR");
-const territoire = new URLSearchParams(location.search).get("territoire") || "saint_omer";
-const donnees = "donnees/" + territoire + "/";
-const bleus = ["#5877c5", "#97aada", "#cad3eb"];
-const logementsHorsZone = "#f4ecdc";
-const autresHorsZone = "#d6c3a0";
 const enZone = "#001a6e";
-const crues = {
-  tri: { frequent: "fréquente", moyen: "moyenne", moyen_climat: "moyenne avec changement climatique", extreme: "extrême" },
-  jrc: { frequent: "décennale", moyen: "centennale", extreme: "de période de retour 500 ans" }
+const teinteZone = "#5877c5";
+const sources = {
+  tri: { nom: "TRI", avertissement: "Les cartes des territoires à risque important d'inondation (TRI) ne couvrent que ces territoires : ailleurs, aucun bâtiment n'est compté." },
+  jrc: { nom: "JRC", avertissement: "Les cartes du JRC, à 100 m de résolution, ne couvrent que les cours d'eau drainant plus de 150 km² et ignorent les digues locales." },
+  eaip: { nom: "EAIP", avertissement: "L'EAIP est une enveloppe maximale de tous les phénomènes possibles, sans période de retour ; elle est lue ici à 26 m de résolution, ce qui l'élargit un peu." }
   };
+const couchesTri = {
+  tri_frequent: ["ALEA_SYNT_01_01FOR_FXX", "ALEA_SYNT_02_01FOR_FXX", "ALEA_SYNT_03_01FOR_FXX"],
+  tri_moyen: ["ALEA_SYNT_01_02MOY_FXX", "ALEA_SYNT_02_02MOY_FXX", "ALEA_SYNT_03_02MOY_FXX"],
+  tri_moyen_climat: ["ALEA_SYNT_01_03MCC_FXX", "ALEA_SYNT_03_03MCC_FXX"],
+  tri_extreme: ["ALEA_SYNT_01_04FAI_FXX", "ALEA_SYNT_02_04FAI_FXX", "ALEA_SYNT_03_04FAI_FXX"]
+  };
+const periodes = { jrc_10: 10, jrc_100: 100, jrc_500: 500 };
+
+function wms(couches) {
+  return "https://www.georisques.gouv.fr/services?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&STYLES=&CRS=EPSG:3857&BBOX={bbox-epsg-3857}&WIDTH=256&HEIGHT=256&FORMAT=image/png&TRANSPARENT=true&LAYERS=" + couches.join(",");
+}
+
+function wmts(couche, format) {
+  return "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&STYLE=normal&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&LAYER=" + couche + "&FORMAT=" + format;
+}
 
 const protocole = new pmtiles.Protocol();
 maplibregl.addProtocol("pmtiles", protocole.tile);
+
+const adresse = chemin => "pmtiles://" + new URL("donnees/" + chemin, location.href).href;
 
 const carte = new maplibregl.Map({
   container: "carte",
   style: {
     version: 8,
     sources: {
-      occupation: {
-        type: "raster",
-        tiles: [donnees + "cosia/{z}/{x}/{y}.png"],
-        tileSize: 256,
-        minzoom: 9,
-        maxzoom: 16
-        },
-      estompage: {
-        type: "raster",
-        tiles: ["https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=IGNF_LIDAR-HD_MNT_ELEVATION.ELEVATIONGRIDCOVERAGE.SHADOW&STYLE=normal&TILEMATRIXSET=PM_0_18&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png"],
-        tileSize: 256,
-        maxzoom: 18
-        },
-      relief: {
-        type: "raster-dem",
-        tiles: [donnees + "relief/{z}/{x}/{y}.png"],
-        encoding: "terrarium",
-        tileSize: 256,
-        minzoom: 9,
-        maxzoom: 14
-        }
+      plan: { type: "raster", tiles: [wmts("GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2", "image/png")], tileSize: 256, maxzoom: 19 },
+      estompage: { type: "raster", tiles: [wmts("IGNF_LIDAR-HD_MNT_ELEVATION.ELEVATIONGRIDCOVERAGE.SHADOW", "image/png")], tileSize: 256, maxzoom: 18 },
+      tri: { type: "raster", tiles: [wms(couchesTri.tri_extreme)], tileSize: 256, minzoom: 11, maxzoom: 19 },
+      eaip: { type: "raster", tiles: [wms(["MASQ_EAIP"])], tileSize: 256, minzoom: 11, maxzoom: 12 },
+      jrc: { type: "vector", url: adresse("jrc.pmtiles") },
+      batiments: { type: "vector", url: adresse("batiments.pmtiles") },
+      communes: { type: "geojson", data: { type: "FeatureCollection", features: [] } }
       },
     layers: [
-      { id: "fond", type: "background", paint: { "background-color": "#b8c8d2" } },
-      { id: "occupation", type: "raster", source: "occupation" },
-      { id: "estompage", type: "raster", source: "estompage", paint: { "raster-opacity": 0.45 } }
+      { id: "fond", type: "background", paint: { "background-color": "#eceae4" } },
+      { id: "plan", type: "raster", source: "plan", paint: { "raster-saturation": -1, "raster-opacity": 0.75 } },
+      { id: "estompage", type: "raster", source: "estompage", minzoom: 11, paint: { "raster-opacity": 0.25 } },
+      { id: "tri", type: "raster", source: "tri", minzoom: 11, layout: { visibility: "none" }, paint: { "raster-opacity": 0.8, "raster-hue-rotate": 75 } },
+      { id: "eaip", type: "raster", source: "eaip", minzoom: 11, layout: { visibility: "none" }, paint: { "raster-opacity": 0.8 } },
+      { id: "jrc", type: "fill", source: "jrc", "source-layer": "jrc", minzoom: 9, layout: { visibility: "none" }, paint: { "fill-color": teinteZone, "fill-opacity": 0.7 } },
+      { id: "batiments", type: "fill", source: "batiments", "source-layer": "batiments", minzoom: 14, paint: { "fill-color": enZone } },
+      {
+        id: "communes", type: "circle", source: "communes", maxzoom: 11,
+        paint: {
+          "circle-color": enZone,
+          "circle-opacity": 0.55,
+          "circle-radius": ["interpolate", ["linear"], ["zoom"],
+            5, ["*", 0.04, ["sqrt", ["get", "h"]]],
+            10, ["*", 0.25, ["sqrt", ["get", "h"]]]]
+          }
+        }
       ]
     },
-  center: [2.255, 50.752],
-  zoom: 14.5,
-  pitch: 45,
-  bearing: -15,
-  maxPitch: 80,
-  light: { anchor: "map", position: [1.4, 210, 40], intensity: 0.35 },
+  bounds: [[-5.2, 41.3], [9.6, 51.1]],
+  maxBounds: [[-12, 38], [16, 54]],
   attributionControl: false
   });
+
+carte.addControl(new maplibregl.NavigationControl({ showCompass: false }));
 
 function element(balise, classe, texte) {
   const noeud = document.createElement(balise);
@@ -141,46 +138,8 @@ function element(balise, classe, texte) {
   return noeud;
 }
 
-function carre(teinte, texte) {
-  const morceau = element("span", null, texte);
-  const marque = element("i");
-  marque.style.background = teinte;
-  morceau.prepend(marque);
-  return morceau;
-}
-
 function entier(valeur) {
-  return valeur == null ? "" : nombres.format(Math.round(valeur));
-}
-
-function valeurDe(indicateurs, ligne, groupe) {
-  const trouvee = indicateurs.tableaux.find(entree => entree.tableau === "synthese" && entree.ligne === ligne && entree.groupe === groupe);
-  return trouvee ? trouvee.valeur : null;
-}
-
-function compter(indicateurs, cle) {
-  document.getElementById("nombre").textContent = entier(valeurDe(indicateurs, "bâtiments", cle));
-  document.getElementById("total").textContent = entier(valeurDe(indicateurs, "bâtiments", "ensemble"));
-  document.getElementById("logements").textContent = entier(valeurDe(indicateurs, "logements", cle));
-  document.getElementById("habitants").textContent = entier(valeurDe(indicateurs, "habitants en 2021", cle));
-  document.getElementById("valeur").textContent = entier(valeurDe(indicateurs, "valeur des logements (M€)", cle));
-}
-
-function bornes(collection) {
-  const limites = new maplibregl.LngLatBounds();
-  collection.features.forEach(entite => {
-    entite.geometry.coordinates.flat(Infinity).forEach((valeur, rang, liste) => {
-      if (rang % 2 === 0) limites.extend([valeur, liste[rang + 1]]);
-    });
-  });
-  return limites;
-}
-
-function elargir(limites) {
-  return [
-    [limites.getWest() - 0.08, limites.getSouth() - 0.05],
-    [limites.getEast() + 0.08, limites.getNorth() + 0.05]
-    ];
+  return nombres.format(Math.round(valeur));
 }
 
 function ajusterLargeur(liste) {
@@ -190,93 +149,101 @@ function ajusterLargeur(liste) {
   mesure.remove();
 }
 
-document.getElementById("territoire").value = territoire;
-ajusterLargeur(document.getElementById("territoire"));
-document.getElementById("territoire").addEventListener("change", evenement => {
-  location.search = "?territoire=" + evenement.target.value;
-});
+function bit(rang) {
+  return ["!=", ["%", ["floor", ["/", ["get", "z"], Math.pow(2, rang)]], 2], 0];
+}
 
 carte.on("load", async () => {
-  const [description, indicateurs, communes] = await Promise.all([
-    fetch(donnees + "territoire.json").then(reponse => reponse.json()),
-    fetch(donnees + "indicateurs.json").then(reponse => reponse.json()),
-    fetch(donnees + "communes.geojson").then(reponse => reponse.json())
-    ]);
-
-  const cles = description.scenarios.map(scenario => scenario.cle);
-  const rare = cles.includes("extreme") ? "extreme" : cles[cles.length - 1];
-  const montres = ["frequent", "moyen", rare].filter(cle => cles.includes(cle));
+  const synthese = await fetch("donnees/communes.json").then(reponse => reponse.json());
+  const groupes = synthese.groupes;
+  const mesures = synthese.mesures;
+  const colonne = (groupe, mesure) => 4 + groupes.indexOf(groupe) * mesures.length + mesures.indexOf(mesure);
 
   const liste = document.getElementById("crue");
-  const marques = montres.map((cle, rang) => carre(bleus[rang], crues[description.source][cle]));
-  montres.forEach(cle => {
-    const option = element("option", null, crues[description.source][cle]);
-    option.value = cle;
-    option.selected = cle === rare;
-    liste.appendChild(option);
-  });
-  marques.forEach(marque => document.getElementById("legende").insertBefore(marque, document.getElementById("batiments")));
-
-  const teinteZone = ["match", ["get", "scenario"]];
-  const rangZone = ["match", ["get", "scenario"]];
-  montres.forEach((cle, rang) => {
-    teinteZone.push(cle, bleus[rang]);
-    rangZone.push(cle, montres.length - rang);
-  });
-  teinteZone.push(bleus[bleus.length - 1]);
-  rangZone.push(0);
-
-  carte.setTerrain({ source: "relief", exaggeration: 1 });
-  carte.jumpTo({ center: indicateurs.centre });
-  carte.setMaxBounds(elargir(bornes(communes)));
-  carte.addSource("zones", { type: "vector", url: "pmtiles://" + new URL(donnees + "zones.pmtiles", location.href).href });
-  carte.addSource("batiments", { type: "vector", url: "pmtiles://" + new URL(donnees + "batiments.pmtiles", location.href).href });
-  carte.addSource("communes", { type: "geojson", data: communes });
-  carte.addLayer({
-    id: "emprises",
-    type: "fill",
-    source: "zones",
-    "source-layer": "emprises",
-    paint: { "fill-color": teinteZone },
-    layout: { "fill-sort-key": rangZone }
-    }, "estompage");
-  carte.addLayer({
-    id: "communes",
-    type: "line",
-    source: "communes",
-    paint: { "line-color": "#111", "line-width": 0.5, "line-dasharray": [3, 2] }
+  Object.keys(sources).forEach(source => {
+    const groupe = element("optgroup");
+    groupe.label = sources[source].nom;
+    synthese.scenarios.filter(scenario => scenario.source === source).forEach(scenario => {
+      const option = element("option", null, scenario.libelle);
+      option.value = scenario.cle;
+      groupe.appendChild(option);
     });
-  carte.addLayer({
-    id: "batiments",
-    type: "fill-extrusion",
-    source: "batiments",
-    "source-layer": "batiments",
-    minzoom: 12,
-    paint: {
-      "fill-extrusion-height": ["*", 3, ["coalesce", ["get", "hauteur"], 3]],
-      "fill-extrusion-opacity": 1
-      }
+    liste.appendChild(groupe);
+  });
+  liste.value = "jrc_100";
+
+  let demande = 0;
+
+  const afficher = (cle, retenues, lieu) => {
+    const sommes = { nombre: 0, total: 0, logements: 0, habitants: 0, valeur: 0 };
+    retenues.forEach(commune => {
+      sommes.total += commune[colonne("ensemble", "batiments")];
+      sommes.nombre += commune[colonne(cle, "batiments")];
+      sommes.logements += commune[colonne(cle, "logements")];
+      sommes.habitants += commune[colonne(cle, "habitants")];
+      sommes.valeur += commune[colonne(cle, "valeur")];
     });
+    document.getElementById("lieu").textContent = lieu;
+    Object.entries(sommes).forEach(([nom, valeur]) => {
+      document.getElementById(nom).textContent = entier(valeur);
+    });
+  };
+
+  // Les communes sont comptées par leur point central ; de près, quand aucun n'est visible,
+  // on retient la commune située au centre de la carte.
+  const compter = async () => {
+    const cle = liste.value;
+    const numero = ++demande;
+    const limites = carte.getBounds();
+    const visibles = synthese.communes.filter(commune => limites.contains([commune[2], commune[3]]));
+    if (visibles.length > 0) {
+      afficher(cle, visibles, "dans la zone affichée");
+      return;
+    }
+    const centre = carte.getCenter();
+    let commune;
+    try {
+      const reponse = await fetch(`https://geo.api.gouv.fr/communes?lat=${centre.lat}&lon=${centre.lng}&fields=code`);
+      const [trouvee] = await reponse.json();
+      commune = trouvee && synthese.communes.find(ligne => ligne[0] === trouvee.code);
+    } catch (erreur) {
+      commune = undefined;
+    }
+    if (!commune) {
+      const distance = ligne => (ligne[2] - centre.lng) ** 2 + (ligne[3] - centre.lat) ** 2;
+      commune = synthese.communes.reduce((meilleure, ligne) => distance(ligne) < distance(meilleure) ? ligne : meilleure);
+    }
+    if (numero === demande) afficher(cle, [commune], "à " + commune[1]);
+  };
 
   const actualiser = () => {
     const cle = liste.value;
-    const visibles = montres.slice(0, montres.indexOf(cle) + 1);
+    const scenario = synthese.scenarios.find(entree => entree.cle === cle);
+    const rang = synthese.scenarios.indexOf(scenario);
     ajusterLargeur(liste);
-    compter(indicateurs, cle);
-    marques.forEach((marque, rang) => {
-      marque.style.visibility = rang < visibles.length ? "visible" : "hidden";
+    ["tri", "eaip", "jrc"].forEach(couche => {
+      carte.setLayoutProperty(couche, "visibility", couche === scenario.source ? "visible" : "none");
     });
-    carte.setFilter("emprises", ["in", ["get", "scenario"], ["literal", visibles]]);
-    carte.setPaintProperty("batiments", "fill-extrusion-color", [
-      "case",
-      ["!=", ["get", cle], null], enZone,
-      ["==", ["get", "usage_1"], "Résidentiel"], logementsHorsZone,
-      autresHorsZone
-      ]);
+    if (scenario.source === "tri") carte.getSource("tri").setTiles([wms(couchesTri[cle])]);
+    if (scenario.source === "jrc") carte.setFilter("jrc", ["==", ["get", "p"], periodes[cle]]);
+    carte.setFilter("batiments", bit(rang));
+    carte.getSource("communes").setData({
+      type: "FeatureCollection",
+      features: synthese.communes
+        .filter(commune => commune[colonne(cle, "habitants")] > 0)
+        .map(commune => ({
+          type: "Feature",
+          properties: { h: commune[colonne(cle, "habitants")] },
+          geometry: { type: "Point", coordinates: [commune[2], commune[3]] }
+        }))
+      });
+    document.getElementById("avertissement").textContent = sources[scenario.source].avertissement;
+    compter();
   };
 
   actualiser();
   liste.addEventListener("change", actualiser);
+  carte.on("moveend", compter);
 });
 </script>
 </body>

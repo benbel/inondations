@@ -1,128 +1,120 @@
+"""Rassemble les sorties départementales : tuiles des bâtiments exposés, tuiles JRC et
+synthèse par commune pour le site.
+
+python code/assembler.py
+"""
+
 import json
 import subprocess
-import sys
 from pathlib import Path
 
-import geopandas as gpd
 import pandas as pd
 
+from commun import scenarios
 
-def tuiler(couches, sortie, zoom_minimum):
-    commande = [
+MESURES = ["batiments", "logements", "habitants", "valeur"]
+
+sortie = Path("site/donnees")
+
+sortie.mkdir(parents=True, exist_ok=True)
+
+dossiers = sorted(Path("data/departements").glob("*/communes.csv"))
+
+print(f"{len(dossiers)} départements")
+
+subprocess.run(
+    [
         "tippecanoe",
         "--force",
+        "--quiet",
         "--output",
-        sortie,
+        str(sortie / "batiments.pmtiles"),
+        "--layer",
+        "batiments",
         "--minimum-zoom",
-        str(zoom_minimum),
+        "14",
         "--maximum-zoom",
-        "15",
+        "14",
         "--no-tile-size-limit",
         "--no-feature-limit",
-        ]
+        *[str(dossier.parent / "batiments.geojsonl") for dossier in dossiers],
+        ],
+    check=True,
+    )
 
-    for nom, chemin in couches.items():
-        commande.extend(["--named-layer", f"{nom}:{chemin}"])
-
-    subprocess.run(commande, check=True)
-
-
-territoire = sys.argv[1]
-
-description = json.loads(Path(f"site/donnees/{territoire}/territoire.json").read_text())
-
-scenarios = [scenario["cle"] for scenario in description["scenarios"]]
-
-batiments = (
-    gpd.read_file(f"data/{territoire}/batiments.gpkg")
-    .merge(
-        pd.read_csv(f"data/{territoire}/population_batiments.csv")
-        .loc[lambda table: table["annee"] == 2021]
-        [["cleabs", "habitants"]],
-        on="cleabs",
-        how="left",
+if Path("data/jrc.geojsonl").exists():
+    subprocess.run(
+        [
+            "tippecanoe",
+            "--force",
+            "--quiet",
+            "--output",
+            str(sortie / "jrc.pmtiles"),
+            "--layer",
+            "jrc",
+            "--minimum-zoom",
+            "5",
+            "--maximum-zoom",
+            "12",
+            "--drop-smallest-as-needed",
+            "--simplification",
+            "2",
+            "data/jrc.geojsonl",
+            ],
+        check=True,
         )
-    .merge(
-        pd.read_csv(f"data/{territoire}/valeurs_batiments.csv")[["cleabs", "valeur"]],
-        on="cleabs",
-        how="left",
-        )
+
+communes = pd.concat(
+    [pd.read_csv(dossier, dtype={"code_insee": str}) for dossier in dossiers], ignore_index=True
+    )
+
+groupes = ["ensemble", *scenarios]
+
+colonnes = [f"{groupe}:{mesure}" for groupe in groupes for mesure in MESURES]
+
+valeurs = communes[colonnes].round(0).astype("int64")
+
+valeurs[[colonne for colonne in colonnes if colonne.endswith(":valeur")]] = (
+    communes[[colonne for colonne in colonnes if colonne.endswith(":valeur")]].round(1)
     )
 
 lignes = []
 
-groupes = {"ensemble": batiments}
-
-for scenario in scenarios:
-    groupes[scenario] = batiments.loc[batiments[scenario].notna()]
-
-for groupe, selection in groupes.items():
-    lignes.append(["synthese", "bâtiments", groupe, len(selection)])
-
-    lignes.append(["synthese", "logements", groupe, selection["nombre_de_logements"].sum()])
-
-    lignes.append(["synthese", "habitants en 2021", groupe, selection["habitants"].sum()])
-
+for rang, commune in communes.iterrows():
     lignes.append(
-        ["synthese", "valeur des logements (M€)", groupe, selection["valeur"].sum() / 1e6]
+        [
+            commune["code_insee"],
+            commune["nom"],
+            commune["longitude"],
+            commune["latitude"],
+            *valeurs.iloc[rang].tolist(),
+            ]
         )
 
-tableaux = (
-    pd.DataFrame(lignes, columns=["tableau", "ligne", "groupe", "valeur"])
-    .assign(valeur=lambda table: table["valeur"].astype(float).round(1))
+(sortie / "communes.json").write_text(
+    json.dumps(
+        {
+            "scenarios": [
+                {"cle": cle, "libelle": definition["libelle"], "source": definition["source"]}
+                for cle, definition in scenarios.items()
+                ],
+            "groupes": groupes,
+            "mesures": MESURES,
+            "communes": lignes,
+            },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        )
     )
+
+total = communes[colonnes].sum()
 
 print(
-    tableaux
-    .pivot_table(index="ligne", columns="groupe", values="valeur", sort=False)
-    .to_string()
+    pd.DataFrame(
+        {mesure: [total[f"{groupe}:{mesure}"] for groupe in groupes] for mesure in MESURES},
+        index=groupes,
+        ).round(0).to_string()
     )
 
-rare = "extreme" if "extreme" in scenarios else scenarios[-1]
-
-centres = groupes[rare].centroid
-
-cellules = (
-    (centres.x // 1000).astype(int).astype(str)
-    + " "
-    + (centres.y // 1000).astype(int).astype(str)
-    )
-
-densite_maximale = centres[cellules == cellules.value_counts().idxmax()]
-
-centre = (
-    gpd.GeoSeries([densite_maximale.union_all().centroid], crs=2154)
-    .to_crs(4326)
-    .iloc[0]
-    )
-
-indicateurs = {
-    "tableaux": tableaux.to_dict(orient="records"),
-    "centre": [round(centre.x, 6), round(centre.y, 6)],
-    }
-
-(
-    batiments
-    [["usage_1", "hauteur", *scenarios, "geometry"]]
-    .assign(geometry=lambda table: table.geometry.force_2d())
-    .to_crs(4326)
-    .to_file(f"data/{territoire}/batiments.geojson", driver="GeoJSON", COORDINATE_PRECISION=6)
-    )
-
-tuiler(
-    {"batiments": f"data/{territoire}/batiments.geojson"},
-    f"site/donnees/{territoire}/batiments.pmtiles",
-    12,
-    )
-
-tuiler(
-    {"emprises": f"data/{territoire}/emprises.geojson"},
-    f"site/donnees/{territoire}/zones.pmtiles",
-    9,
-    )
-
-Path(f"site/donnees/{territoire}/indicateurs.json").write_text(
-    json.dumps(indicateurs, ensure_ascii=False)
-    )
-
-print(f"écrit site/donnees/{territoire} : batiments.pmtiles, zones.pmtiles, indicateurs.json")
+for fichier in sorted(sortie.iterdir()):
+    print(f"{fichier.name} : {fichier.stat().st_size / 1e6:.1f} Mo")
