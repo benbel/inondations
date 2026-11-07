@@ -226,42 +226,17 @@ async function geocoder(texte, limite) {
   return (await reponse.json()).features;
 }
 
-function anneau(batiment) {
-  return batiment.geometry.coordinates[0][0];
-}
-
-function croise(sommet, precedent, point) {
-  return (sommet[1] > point[1]) !== (precedent[1] > point[1])
-    && point[0] < (precedent[0] - sommet[0]) * (point[1] - sommet[1]) / (precedent[1] - sommet[1]) + sommet[0];
-}
-
-function contient(points, point) {
-  let dedans = false;
-  points.forEach((sommet, rang) => {
-    const precedent = points[(rang + points.length - 1) % points.length];
-    if (croise(sommet, precedent, point)) dedans = !dedans;
-  });
-  return dedans;
-}
-
-function eloignement(points, point) {
-  const x = points.reduce((somme, sommet) => somme + sommet[0], 0) / points.length;
-  const y = points.reduce((somme, sommet) => somme + sommet[1], 0) / points.length;
-  return (x - point[0]) ** 2 + (y - point[1]) ** 2;
-}
-
-async function batimentA(point) {
-  const bornes = [point[0] - 0.0004, point[1] - 0.0003, point[0] + 0.0004, point[1] + 0.0003];
-  const reponse = await fetch("https://data.geopf.fr/wfs/ows?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=BDTOPO_V3:batiment&OUTPUTFORMAT=application/json&SRSNAME=CRS:84&PROPERTYNAME=cleabs,geometrie&COUNT=50&BBOX=" + bornes.join(",") + ",CRS:84");
-  const batiments = (await reponse.json()).features;
-  const contenant = batiments.find(batiment => contient(anneau(batiment), point));
-  const proches = batiments.slice().sort((premier, second) => eloignement(anneau(premier), point) - eloignement(anneau(second), point));
-  return contenant || proches[0];
+async function batiments(resultat) {
+  if (resultat.properties.type !== "housenumber") return [];
+  const reponse = await fetch("https://rnb-api.beta.gouv.fr/api/alpha/buildings/?cle_interop_ban=" + resultat.properties.id);
+  return (await reponse.json()).results
+    .filter(batiment => batiment.shape)
+    .map(batiment => ({ type: "Feature", properties: {}, geometry: batiment.shape }));
 }
 
 async function surligner(resultat) {
-  const batiment = resultat.properties.type === "housenumber" ? await batimentA(resultat.geometry.coordinates).catch(() => null) : null;
-  carte.getSource("adresse").setData({ type: "FeatureCollection", features: batiment ? [batiment] : [] });
+  const trouves = await batiments(resultat).catch(() => []);
+  carte.getSource("adresse").setData({ type: "FeatureCollection", features: trouves });
 }
 
 function centrer(resultat) {
