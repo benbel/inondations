@@ -10,9 +10,10 @@ d'aléa :
 | JRC | périodes de retour 10, 100 et 500 ans | grands cours d'eau, 100 m | tuiles produites ici |
 | EAIP (Géorisques) | enveloppe maximale | tout le territoire | WMS Géorisques |
 
-Le fond (Plan IGN, estompage) et les zones TRI et EAIP viennent de services de tuiles ;
-le site ne contient que les bâtiments exposés (zoom 14), les zones JRC et une synthèse par
-commune.
+Le fond (CoSIA 2021-2023, recolorée en teintes douces dans le navigateur, estompage, noms de
+villes et de cours d'eau du Plan IGN) et les zones TRI et EAIP viennent de services de tuiles ;
+le site ne contient que les bâtiments exposés (zooms 13 et 14), les zones JRC et une synthèse
+par commune.
 
 ## Chaîne de traitement
 

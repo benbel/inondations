@@ -32,9 +32,12 @@ subprocess.run(
         "--layer",
         "batiments",
         "--minimum-zoom",
-        "14",
+        "13",
         "--maximum-zoom",
         "14",
+        # Au zoom 13, une grille de 1 024 pas (environ 3 m) suffit et réduit d'un tiers le poids.
+        "--low-detail",
+        "10",
         "--no-tile-size-limit",
         "--no-feature-limit",
         *[str(dossier.parent / "batiments.geojsonl") for dossier in dossiers],

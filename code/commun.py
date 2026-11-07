@@ -27,7 +27,7 @@ scenarios = {
         },
     "tri_moyen_climat": {
         "source": "tri",
-        "libelle": "moyenne avec changement climatique (TRI)",
+        "libelle": "moyenne + climat (TRI)",
         "couches": ["ALEA_SYNT_01_03MCC_FXX", "ALEA_SYNT_03_03MCC_FXX"],
         },
     "tri_extreme": {
@@ -37,8 +37,8 @@ scenarios = {
         },
     "jrc_10": {"source": "jrc", "libelle": "décennale (JRC)", "periode": 10},
     "jrc_100": {"source": "jrc", "libelle": "centennale (JRC)", "periode": 100},
-    "jrc_500": {"source": "jrc", "libelle": "de période de retour 500 ans (JRC)", "periode": 500},
-    "eaip": {"source": "eaip", "libelle": "extrême, enveloppe approchée (EAIP)"},
+    "jrc_500": {"source": "jrc", "libelle": "cinq-centennale (JRC)", "periode": 500},
+    "eaip": {"source": "eaip", "libelle": "maximale (EAIP)"},
     }
 
 GEORISQUES = "https://www.georisques.gouv.fr/services"

@@ -12,12 +12,11 @@ body { margin: 0; padding: 20px 32px; box-sizing: border-box;
                     "Book Antiqua", serif;
        font-size: 15px; line-height: 1.45;
        font-variant-numeric: oldstyle-nums }
-header { margin-bottom: 16px }
 h1 { font-size: 19px; font-weight: normal; margin: 0 0 8px }
-.phrase { margin: 0 }
+p { margin: 0 0 16px }
 select { appearance: none; -webkit-appearance: none; font: inherit; color: #9E1B1B;
          background: none; border: 0; border-bottom: 1.5px solid #9E1B1B; border-radius: 0;
-         padding: 0 18px 0 4px; cursor: pointer; max-width: 100% }
+         padding: 0 18px 0 4px; cursor: pointer }
 select:hover { background: rgba(158, 27, 27, 0.08) }
 select:focus-visible { outline: 2px solid #9E1B1B; outline-offset: 2px }
 .choix { position: relative; white-space: nowrap }
@@ -25,51 +24,29 @@ select:focus-visible { outline: 2px solid #9E1B1B; outline-offset: 2px }
                 pointer-events: none; font-size: 12px; line-height: 1.9 }
 .mesure { position: absolute; visibility: hidden; white-space: pre }
 .nombre { font-variant-numeric: lining-nums }
-#carte { height: 76vh; background: #eceae4 }
-.legende { font-size: 13px; margin: 8px 0 0 }
-.legende i { display: inline-block; width: 9px; height: 9px; margin: 0 5px 0 0; vertical-align: 0 }
-.legende i.rond { border-radius: 50% }
-.legende span { margin-right: 16px }
-.note { color: #555 }
+.batiments { color: #001a6e; font-weight: bold }
+#carte { height: 80vh; background: #b8c8d2 }
 @media (max-width: 820px) {
   body { padding: 16px }
-  #carte { height: 62vh }
+  #carte { height: 66vh }
 }
 </style>
 </head>
 <body>
-<header>
-  <h1>Zones inondables en France métropolitaine</h1>
-  <p class="phrase">Pour une crue <span class="choix"><select id="crue" title="Choisir la crue"></select></span>,
-  <span id="lieu">dans la zone affichée</span>, <span class="nombre" id="nombre"></span> bâtiments sur
-  <span class="nombre" id="total"></span> seraient en zone inondable, avec
-  <span class="nombre" id="logements"></span> logements,
-  <span class="nombre" id="habitants"></span> habitants en 2021 et une valeur estimée de
-  <span class="nombre" id="valeur"></span> millions d'euros.</p>
-</header>
-<main>
-  <div id="carte"></div>
-  <p class="legende">
-    <span><i class="rond" style="background: rgba(0, 26, 110, 0.55)"></i>habitants en zone inondable, par commune (vue d'ensemble)</span>
-    <span><i style="background: #5877c5"></i>zone inondable (à partir du zoom 11)</span>
-    <span><i style="background: #001a6e"></i>bâtiment en zone inondable (à partir du zoom 14)</span>
-  </p>
-  <p class="legende note" id="avertissement"></p>
-  <p class="legende note">Sources : IGN (Plan IGN, BD TOPO, Admin Express, estompage LiDAR HD),
-  Géorisques (TRI, EAIP), JRC (cartes d'aléa européennes), Insee (Filosofi 2021), DGFiP (DVF 2021-2025).</p>
-  <p class="legende note">La valeur n'est pas estimée en Moselle, dans le Bas-Rhin et le Haut-Rhin, absents de DVF.</p>
-</main>
+<h1>Bâtiments en zone inondable</h1>
+<p>Pour une crue <span class="choix"><select id="crue" title="Choisir la crue"></select></span>,
+<span class="batiments"><span class="nombre" id="nombre"></span> bâtiments</span>
+<span id="lieu">dans la vue</span> seraient inondés, avec
+<span class="nombre" id="habitants"></span> habitants et
+<span class="nombre" id="valeur"></span> M€ de logements.</p>
+<div id="carte"></div>
 <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js"></script>
 <script>
 const nombres = new Intl.NumberFormat("fr-FR");
 const enZone = "#001a6e";
 const teinteZone = "#5877c5";
-const sources = {
-  tri: { nom: "TRI", avertissement: "Les cartes des territoires à risque important d'inondation (TRI) ne couvrent que ces territoires : ailleurs, aucun bâtiment n'est compté." },
-  jrc: { nom: "JRC", avertissement: "Les cartes du JRC, à 100 m de résolution, ne couvrent que les cours d'eau drainant plus de 150 km² et ignorent les digues locales." },
-  eaip: { nom: "EAIP", avertissement: "L'EAIP est une enveloppe maximale de tous les phénomènes possibles, sans période de retour ; elle est lue ici à 26 m de résolution, ce qui l'élargit un peu." }
-  };
+const IGN = "https://data.geopf.fr/annexes/ressources/vectorTiles";
 const couchesTri = {
   tri_frequent: ["ALEA_SYNT_01_01FOR_FXX", "ALEA_SYNT_02_01FOR_FXX", "ALEA_SYNT_03_01FOR_FXX"],
   tri_moyen: ["ALEA_SYNT_01_02MOY_FXX", "ALEA_SYNT_02_02MOY_FXX", "ALEA_SYNT_03_02MOY_FXX"],
@@ -78,13 +55,72 @@ const couchesTri = {
   };
 const periodes = { jrc_10: 10, jrc_100: 100, jrc_500: 500 };
 
+// Classes CoSIA (couleur d'origine du service IGN) et teinte adoucie qui les remplace.
+const classesCosia = [
+  ["#ce7079", "#efe9dd"], ["#987752", "#dde6c4"], ["#a6aab7", "#efe9dd"], ["#62d0ff", "#efe9dd"],
+  ["#bbb096", "#dde6c4"], ["#3375a1", "#b8c8d2"], ["#e9effe", "#dde6c4"], ["#126421", "#8fb877"],
+  ["#4c9129", "#8fb877"], ["#b5c335", "#c3dba6"], ["#b08290", "#dde6c4"], ["#8cd76a", "#c3dba6"],
+  ["#decf55", "#dde6c4"], ["#d0a349", "#dde6c4"], ["#b9e2d4", "#efe9dd"], ["#df8b52", "#c3dba6"],
+  ["#222222", "#efe9dd"]
+  ].map(paire => paire.map(teinte => [1, 3, 5].map(rang => parseInt(teinte.slice(rang, rang + 2), 16))));
+const correspondances = new Map();
+
+function adoucir(rouge, vert, bleu) {
+  const cle = (rouge << 16) | (vert << 8) | bleu;
+  if (!correspondances.has(cle)) {
+    let meilleure = classesCosia[0];
+    let ecart = Infinity;
+    classesCosia.forEach(classe => {
+      const [r, v, b] = classe[0];
+      const distance = (r - rouge) ** 2 + (v - vert) ** 2 + (b - bleu) ** 2;
+      if (distance < ecart) { ecart = distance; meilleure = classe; }
+    });
+    correspondances.set(cle, meilleure[1]);
+  }
+  return correspondances.get(cle);
+}
+
+function wmts(couche, format, jeu, style = "normal") {
+  return "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&STYLE=" + style + "&TILEMATRIXSET=" + jeu + "&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&LAYER=" + couche + "&FORMAT=" + format;
+}
+
 function wms(couches) {
   return "https://www.georisques.gouv.fr/services?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&STYLES=&CRS=EPSG:3857&BBOX={bbox-epsg-3857}&WIDTH=256&HEIGHT=256&FORMAT=image/png&TRANSPARENT=true&LAYERS=" + couches.join(",");
 }
 
-function wmts(couche, format) {
-  return "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&STYLE=normal&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&LAYER=" + couche + "&FORMAT=" + format;
+async function imageCosia(z, x, y, signal) {
+  const reponse = await fetch(
+    wmts("IGNF_COSIA_2021-2023", "image/png", "PM_6_18").replace("{z}", z).replace("{x}", x).replace("{y}", y),
+    { signal });
+  return reponse.ok ? createImageBitmap(await reponse.blob()) : null;
 }
+
+// Tuiles CoSIA recolorées dans le navigateur ; au zoom 5, que le service ne fournit pas,
+// on assemble les quatre tuiles du zoom 6.
+maplibregl.addProtocol("cosia", async (parametres, controleur) => {
+  const [z, x, y] = parametres.url.slice("cosia://".length).split("/").map(Number);
+  const toile = new OffscreenCanvas(256, 256);
+  const contexte = toile.getContext("2d", { willReadFrequently: true });
+  contexte.imageSmoothingEnabled = false;
+  if (z >= 6) {
+    const image = await imageCosia(z, x, y, controleur.signal);
+    if (image) contexte.drawImage(image, 0, 0);
+  } else {
+    const enfants = await Promise.all([0, 1].flatMap(dy => [0, 1].map(dx =>
+      imageCosia(z + 1, 2 * x + dx, 2 * y + dy, controleur.signal).then(image => [dx, dy, image]))));
+    enfants.forEach(([dx, dy, image]) => { if (image) contexte.drawImage(image, dx * 128, dy * 128, 128, 128); });
+  }
+  const pixels = contexte.getImageData(0, 0, 256, 256);
+  const valeurs = pixels.data;
+  for (let rang = 0; rang < valeurs.length; rang += 4) {
+    if (valeurs[rang + 3] < 128) { valeurs[rang + 3] = 0; continue; }
+    const [r, v, b] = adoucir(valeurs[rang], valeurs[rang + 1], valeurs[rang + 2]);
+    valeurs[rang] = r; valeurs[rang + 1] = v; valeurs[rang + 2] = b; valeurs[rang + 3] = 255;
+  }
+  contexte.putImageData(pixels, 0, 0);
+  const fichier = await toile.convertToBlob({ type: "image/png" });
+  return { data: await fichier.arrayBuffer() };
+});
 
 const protocole = new pmtiles.Protocol();
 maplibregl.addProtocol("pmtiles", protocole.tile);
@@ -95,9 +131,10 @@ const carte = new maplibregl.Map({
   container: "carte",
   style: {
     version: 8,
+    glyphs: IGN + "/fonts/{fontstack}/{range}.pbf",
     sources: {
-      plan: { type: "raster", tiles: [wmts("GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2", "image/png")], tileSize: 256, maxzoom: 19 },
-      estompage: { type: "raster", tiles: [wmts("IGNF_LIDAR-HD_MNT_ELEVATION.ELEVATIONGRIDCOVERAGE.SHADOW", "image/png")], tileSize: 256, maxzoom: 18 },
+      cosia: { type: "raster", tiles: ["cosia://{z}/{x}/{y}"], tileSize: 256, minzoom: 5, maxzoom: 18 },
+      estompage: { type: "raster", tiles: [wmts("ELEVATION.ELEVATIONGRIDCOVERAGE.SHADOW", "image/png", "PM_0_15", "estompage_grayscale")], tileSize: 256, maxzoom: 15 },
       tri: { type: "raster", tiles: [wms(couchesTri.tri_extreme)], tileSize: 256, minzoom: 11, maxzoom: 19 },
       eaip: { type: "raster", tiles: [wms(["MASQ_EAIP"])], tileSize: 256, minzoom: 11, maxzoom: 12 },
       jrc: { type: "vector", url: adresse("jrc.pmtiles") },
@@ -105,45 +142,58 @@ const carte = new maplibregl.Map({
       communes: { type: "geojson", data: { type: "FeatureCollection", features: [] } }
       },
     layers: [
-      { id: "fond", type: "background", paint: { "background-color": "#eceae4" } },
-      { id: "plan", type: "raster", source: "plan", paint: { "raster-saturation": -1, "raster-opacity": 0.75 } },
-      { id: "estompage", type: "raster", source: "estompage", minzoom: 11, paint: { "raster-opacity": 0.25 } },
-      { id: "tri", type: "raster", source: "tri", minzoom: 11, layout: { visibility: "none" }, paint: { "raster-opacity": 0.8, "raster-hue-rotate": 75 } },
-      { id: "eaip", type: "raster", source: "eaip", minzoom: 11, layout: { visibility: "none" }, paint: { "raster-opacity": 0.8 } },
-      { id: "jrc", type: "fill", source: "jrc", "source-layer": "jrc", minzoom: 9, layout: { visibility: "none" }, paint: { "fill-color": teinteZone, "fill-opacity": 0.7 } },
-      { id: "batiments", type: "fill", source: "batiments", "source-layer": "batiments", minzoom: 14, paint: { "fill-color": enZone } },
+      { id: "fond", type: "background", paint: { "background-color": "#b8c8d2" } },
+      { id: "cosia", type: "raster", source: "cosia" },
+      { id: "estompage", type: "raster", source: "estompage", paint: { "raster-opacity": 0.35 } },
+      { id: "tri", type: "raster", source: "tri", layout: { visibility: "none" }, paint: { "raster-hue-rotate": 75, "raster-opacity": 0.55 } },
+      { id: "eaip", type: "raster", source: "eaip", layout: { visibility: "none" }, paint: { "raster-opacity": 0.6 } },
+      { id: "jrc", type: "fill", source: "jrc", "source-layer": "jrc", minzoom: 9, layout: { visibility: "none" }, paint: { "fill-color": teinteZone, "fill-opacity": 0.3 } },
+      { id: "batiments", type: "fill", source: "batiments", "source-layer": "batiments", minzoom: 13, paint: { "fill-color": enZone } },
       {
-        id: "communes", type: "circle", source: "communes", maxzoom: 11,
+        // En deçà du zoom 13, les bâtiments inondables sont résumés par commune.
+        id: "communes", type: "circle", source: "communes", maxzoom: 13,
         paint: {
           "circle-color": enZone,
-          "circle-opacity": 0.55,
+          "circle-opacity": ["interpolate", ["linear"], ["zoom"], 11, 0.75, 13, 0.15],
           "circle-radius": ["interpolate", ["linear"], ["zoom"],
-            5, ["*", 0.04, ["sqrt", ["get", "h"]]],
-            10, ["*", 0.25, ["sqrt", ["get", "h"]]]]
+            5, ["*", 0.08, ["sqrt", ["get", "b"]]],
+            9, ["*", 0.3, ["sqrt", ["get", "b"]]],
+            12, ["*", 0.6, ["sqrt", ["get", "b"]]]]
           }
         }
       ]
     },
   bounds: [[-5.2, 41.3], [9.6, 51.1]],
+  minZoom: 5,
   maxBounds: [[-12, 38], [16, 54]],
   attributionControl: false
   });
 
 carte.addControl(new maplibregl.NavigationControl({ showCompass: false }));
+carte.addControl(new maplibregl.AttributionControl({
+  compact: true,
+  customAttribution: "IGN (CoSIA, BD TOPO, Plan IGN), Géorisques (TRI, EAIP), JRC, Insee (Filosofi 2021), DGFiP (DVF)"
+  }));
 
-function element(balise, classe, texte) {
+// Du Plan IGN, on ne garde que les noms de villes et de cours d'eau.
+async function ajouterToponymes() {
+  const style = await fetch(IGN + "/styles/PLAN.IGN/toponymes.json").then(reponse => reponse.json());
+  Object.entries(style.sources).forEach(([nom, source]) => carte.addSource(nom, source));
+  style.layers
+    .filter(couche => couche.type === "symbol")
+    .filter(couche => couche.id.startsWith("toponyme localite importance") || couche["source-layer"] === "toponyme_hydro_lin")
+    .forEach(couche => carte.addLayer({ ...couche, id: "toponymes " + couche.id }));
+}
+
+function element(balise, texte) {
   const noeud = document.createElement(balise);
-  if (classe) noeud.className = classe;
   if (texte !== undefined) noeud.textContent = texte;
   return noeud;
 }
 
-function entier(valeur) {
-  return nombres.format(Math.round(valeur));
-}
-
 function ajusterLargeur(liste) {
-  const mesure = element("span", "mesure", liste.options[liste.selectedIndex].text);
+  const mesure = element("span", liste.options[liste.selectedIndex].text);
+  mesure.className = "mesure";
   liste.parentNode.appendChild(mesure);
   liste.style.width = (mesure.getBoundingClientRect().width + 26) + "px";
   mesure.remove();
@@ -154,17 +204,16 @@ function bit(rang) {
 }
 
 carte.on("load", async () => {
+  ajouterToponymes().catch(erreur => console.warn("toponymes indisponibles", erreur));
   const synthese = await fetch("donnees/communes.json").then(reponse => reponse.json());
-  const groupes = synthese.groupes;
-  const mesures = synthese.mesures;
-  const colonne = (groupe, mesure) => 4 + groupes.indexOf(groupe) * mesures.length + mesures.indexOf(mesure);
+  const colonne = (groupe, mesure) => 4 + synthese.groupes.indexOf(groupe) * synthese.mesures.length + synthese.mesures.indexOf(mesure);
 
   const liste = document.getElementById("crue");
-  Object.keys(sources).forEach(source => {
+  ["tri", "jrc", "eaip"].forEach(source => {
     const groupe = element("optgroup");
-    groupe.label = sources[source].nom;
+    groupe.label = source.toUpperCase();
     synthese.scenarios.filter(scenario => scenario.source === source).forEach(scenario => {
-      const option = element("option", null, scenario.libelle);
+      const option = element("option", scenario.libelle);
       option.value = scenario.cle;
       groupe.appendChild(option);
     });
@@ -175,18 +224,11 @@ carte.on("load", async () => {
   let demande = 0;
 
   const afficher = (cle, retenues, lieu) => {
-    const sommes = { nombre: 0, total: 0, logements: 0, habitants: 0, valeur: 0 };
-    retenues.forEach(commune => {
-      sommes.total += commune[colonne("ensemble", "batiments")];
-      sommes.nombre += commune[colonne(cle, "batiments")];
-      sommes.logements += commune[colonne(cle, "logements")];
-      sommes.habitants += commune[colonne(cle, "habitants")];
-      sommes.valeur += commune[colonne(cle, "valeur")];
-    });
+    const somme = mesure => retenues.reduce((total, commune) => total + commune[colonne(cle, mesure)], 0);
     document.getElementById("lieu").textContent = lieu;
-    Object.entries(sommes).forEach(([nom, valeur]) => {
-      document.getElementById(nom).textContent = entier(valeur);
-    });
+    document.getElementById("nombre").textContent = nombres.format(Math.round(somme("batiments")));
+    document.getElementById("habitants").textContent = nombres.format(Math.round(somme("habitants")));
+    document.getElementById("valeur").textContent = nombres.format(Math.round(somme("valeur")));
   };
 
   // Les communes sont comptées par leur point central ; de près, quand aucun n'est visible,
@@ -197,7 +239,7 @@ carte.on("load", async () => {
     const limites = carte.getBounds();
     const visibles = synthese.communes.filter(commune => limites.contains([commune[2], commune[3]]));
     if (visibles.length > 0) {
-      afficher(cle, visibles, "dans la zone affichée");
+      afficher(cle, visibles, "dans la vue");
       return;
     }
     const centre = carte.getCenter();
@@ -219,25 +261,23 @@ carte.on("load", async () => {
   const actualiser = () => {
     const cle = liste.value;
     const scenario = synthese.scenarios.find(entree => entree.cle === cle);
-    const rang = synthese.scenarios.indexOf(scenario);
     ajusterLargeur(liste);
     ["tri", "eaip", "jrc"].forEach(couche => {
       carte.setLayoutProperty(couche, "visibility", couche === scenario.source ? "visible" : "none");
     });
     if (scenario.source === "tri") carte.getSource("tri").setTiles([wms(couchesTri[cle])]);
     if (scenario.source === "jrc") carte.setFilter("jrc", ["==", ["get", "p"], periodes[cle]]);
-    carte.setFilter("batiments", bit(rang));
+    carte.setFilter("batiments", bit(synthese.scenarios.indexOf(scenario)));
     carte.getSource("communes").setData({
       type: "FeatureCollection",
       features: synthese.communes
-        .filter(commune => commune[colonne(cle, "habitants")] > 0)
+        .filter(commune => commune[colonne(cle, "batiments")] > 0)
         .map(commune => ({
           type: "Feature",
-          properties: { h: commune[colonne(cle, "habitants")] },
+          properties: { b: commune[colonne(cle, "batiments")] },
           geometry: { type: "Point", coordinates: [commune[2], commune[3]] }
         }))
       });
-    document.getElementById("avertissement").textContent = sources[scenario.source].avertissement;
     compter();
   };
 
