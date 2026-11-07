@@ -1,128 +1,138 @@
 import json
 import subprocess
-import sys
 from pathlib import Path
 
-import geopandas as gpd
 import pandas as pd
+from pyproj import Transformer
+
+from commun import MESURES, scenarios
+
+SORTIE = Path("site/donnees")
+
+COLONNES = [f"{cle}:{mesure}" for cle in scenarios for mesure in MESURES]
 
 
-def tuiler(couches, sortie, zoom_minimum):
-    commande = [
-        "tippecanoe",
-        "--force",
-        "--output",
-        sortie,
-        "--minimum-zoom",
-        str(zoom_minimum),
-        "--maximum-zoom",
-        "15",
-        "--no-tile-size-limit",
-        "--no-feature-limit",
+def tuiler(entrees, sortie, couche, options):
+    subprocess.run(
+        [
+            "tippecanoe",
+            "--force",
+            "--quiet",
+            "--output",
+            str(sortie),
+            "--layer",
+            couche,
+            *options,
+            *[str(entree) for entree in entrees],
+            ],
+        check=True,
+        )
+
+
+def lire(dossiers, nom):
+    return pd.concat(
+        [pd.read_csv(dossier / nom, dtype={"code_insee": str}) for dossier in dossiers],
+        ignore_index=True,
+        )
+
+
+def arrondir(table):
+    entiers = [colonne for colonne in COLONNES if not colonne.endswith(":valeur")]
+
+    return (
+        table[COLONNES]
+        .round(1)
+        .astype(dict.fromkeys(entiers, int))
+        .astype(object)
+        .to_numpy()
+        .tolist()
+        )
+
+
+def ecrire_communes(communes):
+    lignes = [
+        [code, nom, longitude, latitude, *valeurs]
+        for code, nom, longitude, latitude, valeurs in zip(
+            communes["code_insee"],
+            communes["nom"],
+            communes["longitude"],
+            communes["latitude"],
+            arrondir(communes),
+            strict=True,
+            )
         ]
 
-    for nom, chemin in couches.items():
-        commande.extend(["--named-layer", f"{nom}:{chemin}"])
-
-    subprocess.run(commande, check=True)
-
-
-territoire = sys.argv[1]
-
-description = json.loads(Path(f"site/donnees/{territoire}/territoire.json").read_text())
-
-scenarios = [scenario["cle"] for scenario in description["scenarios"]]
-
-batiments = (
-    gpd.read_file(f"data/{territoire}/batiments.gpkg")
-    .merge(
-        pd.read_csv(f"data/{territoire}/population_batiments.csv")
-        .loc[lambda table: table["annee"] == 2021]
-        [["cleabs", "habitants"]],
-        on="cleabs",
-        how="left",
-        )
-    .merge(
-        pd.read_csv(f"data/{territoire}/valeurs_batiments.csv")[["cleabs", "valeur"]],
-        on="cleabs",
-        how="left",
-        )
-    )
-
-lignes = []
-
-groupes = {"ensemble": batiments}
-
-for scenario in scenarios:
-    groupes[scenario] = batiments.loc[batiments[scenario].notna()]
-
-for groupe, selection in groupes.items():
-    lignes.append(["synthese", "bâtiments", groupe, len(selection)])
-
-    lignes.append(["synthese", "logements", groupe, selection["nombre_de_logements"].sum()])
-
-    lignes.append(["synthese", "habitants en 2021", groupe, selection["habitants"].sum()])
-
-    lignes.append(
-        ["synthese", "valeur des logements (M€)", groupe, selection["valeur"].sum() / 1e6]
+    (SORTIE / "communes.json").write_text(
+        json.dumps(
+            {
+                "scenarios": [
+                    {"cle": cle, "libelle": definition["libelle"], "source": definition["source"]}
+                    for cle, definition in scenarios.items()
+                    ],
+                "colonnes": COLONNES,
+                "communes": lignes,
+                },
+            ensure_ascii=False,
+            separators=(",", ":"),
+            )
         )
 
-tableaux = (
-    pd.DataFrame(lignes, columns=["tableau", "ligne", "groupe", "valeur"])
-    .assign(valeur=lambda table: table["valeur"].astype(float).round(1))
-    )
 
-print(
-    tableaux
-    .pivot_table(index="ligne", columns="groupe", values="valeur", sort=False)
-    .to_string()
-    )
+def carreaux_du_scenario(centres, cle):
+    return (
+        centres
+        .loc[centres[f"{cle}:batiments"] > 0]
+        .assign(
+            batiments=lambda table: table[f"{cle}:batiments"].round(0).astype(int),
+            habitants=lambda table: table[f"{cle}:habitants"].round(0).astype(int),
+            valeur=lambda table: table[f"{cle}:valeur"].round(1),
+            )
+        [["longitude", "latitude", *MESURES]]
+        .astype(object)
+        .to_numpy()
+        .tolist()
+        )
 
-rare = "extreme" if "extreme" in scenarios else scenarios[-1]
 
-centres = groupes[rare].centroid
+def ecrire_carreaux(carreaux):
+    longitudes, latitudes = Transformer.from_crs(2154, 4326, always_xy=True).transform(
+        carreaux["x"] * 1000 + 500, carreaux["y"] * 1000 + 500
+        )
 
-cellules = (
-    (centres.x // 1000).astype(int).astype(str)
-    + " "
-    + (centres.y // 1000).astype(int).astype(str)
-    )
+    centres = carreaux.assign(longitude=longitudes.round(3), latitude=latitudes.round(3))
 
-densite_maximale = centres[cellules == cellules.value_counts().idxmax()]
+    grille = {cle: carreaux_du_scenario(centres, cle) for cle in scenarios}
 
-centre = (
-    gpd.GeoSeries([densite_maximale.union_all().centroid], crs=2154)
-    .to_crs(4326)
-    .iloc[0]
-    )
+    (SORTIE / "carreaux.json").write_text(json.dumps(grille, separators=(",", ":")))
 
-indicateurs = {
-    "tableaux": tableaux.to_dict(orient="records"),
-    "centre": [round(centre.x, 6), round(centre.y, 6)],
-    }
 
-(
-    batiments
-    [["usage_1", "hauteur", *scenarios, "geometry"]]
-    .assign(geometry=lambda table: table.geometry.force_2d())
-    .to_crs(4326)
-    .to_file(f"data/{territoire}/batiments.geojson", driver="GeoJSON", COORDINATE_PRECISION=6)
+SORTIE.mkdir(parents=True, exist_ok=True)
+
+dossiers = sorted(chemin.parent for chemin in Path("data/departements").glob("*/communes.csv"))
+
+tuiler(
+    [dossier / "batiments.geojsonl" for dossier in dossiers],
+    SORTIE / "batiments.pmtiles",
+    "batiments",
+    [
+        "--minimum-zoom=13",
+        "--maximum-zoom=14",
+        "--low-detail=10",
+        "--no-tile-size-limit",
+        "--no-feature-limit",
+        ],
     )
 
 tuiler(
-    {"batiments": f"data/{territoire}/batiments.geojson"},
-    f"site/donnees/{territoire}/batiments.pmtiles",
-    12,
+    [Path("data/jrc.geojsonl")],
+    SORTIE / "jrc.pmtiles",
+    "jrc",
+    ["--minimum-zoom=5", "--maximum-zoom=12", "--drop-smallest-as-needed", "--simplification=2"],
     )
 
-tuiler(
-    {"emprises": f"data/{territoire}/emprises.geojson"},
-    f"site/donnees/{territoire}/zones.pmtiles",
-    9,
-    )
+ecrire_communes(lire(dossiers, "communes.csv"))
 
-Path(f"site/donnees/{territoire}/indicateurs.json").write_text(
-    json.dumps(indicateurs, ensure_ascii=False)
-    )
+ecrire_carreaux(lire(dossiers, "carreaux.csv").groupby(["x", "y"], as_index=False).sum())
 
-print(f"écrit site/donnees/{territoire} : batiments.pmtiles, zones.pmtiles, indicateurs.json")
+for fichier in sorted(SORTIE.iterdir()):
+    print(f"{fichier.name} : {fichier.stat().st_size / 1e6:.1f} Mo")

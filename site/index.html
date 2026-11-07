@@ -12,9 +12,8 @@ body { margin: 0; padding: 20px 32px; box-sizing: border-box;
                     "Book Antiqua", serif;
        font-size: 15px; line-height: 1.45;
        font-variant-numeric: oldstyle-nums }
-header { margin-bottom: 16px }
 h1 { font-size: 19px; font-weight: normal; margin: 0 0 8px }
-.phrase { margin: 0 }
+p { margin: 0 0 16px }
 select { appearance: none; -webkit-appearance: none; font: inherit; color: #9E1B1B;
          background: none; border: 0; border-bottom: 1.5px solid #9E1B1B; border-radius: 0;
          padding: 0 18px 0 4px; cursor: pointer }
@@ -25,259 +24,359 @@ select:focus-visible { outline: 2px solid #9E1B1B; outline-offset: 2px }
                 pointer-events: none; font-size: 12px; line-height: 1.9 }
 .mesure { position: absolute; visibility: hidden; white-space: pre }
 .nombre { font-variant-numeric: lining-nums }
-#carte { height: 78vh; background: #b8c8d2 }
-.legende { font-size: 13px; margin: 8px 0 0 }
-.legende i { display: inline-block; width: 9px; height: 9px; margin: 0 5px 0 0; vertical-align: 0 }
-.legende span { margin-right: 16px }
-.grille { display: grid; grid-template-columns: repeat(4, auto); justify-content: start; row-gap: 6px }
+.batiments { color: #001a6e }
+input { font: inherit; color: #111; background: none; border: 0; border-bottom: 1.5px solid #9E1B1B;
+        border-radius: 0; padding: 0 4px; width: min(28em, 100%); box-sizing: border-box }
+input::placeholder { color: #888 }
+input::-webkit-calendar-picker-indicator { display: none !important }
+input:focus-visible { outline: 2px solid #9E1B1B; outline-offset: 2px }
+#carte { height: 80vh; background: #b8c8d2 }
 @media (max-width: 820px) {
   body { padding: 16px }
-  #carte { height: 62vh }
+  #carte { height: 66vh }
 }
 </style>
-</head>
 <body>
-<header>
-  <h1>Zones inondables de <span class="choix"><select id="territoire" title="Choisir le territoire">
-    <option value="saint_omer">Saint-Omer</option>
-    <option value="ales">Alès</option>
-    <option value="saint_malo">Saint-Malo et de la baie du Mont-Saint-Michel</option>
-    <option value="aude">l'Aude, de Carcassonne à Trèbes</option>
-    <option value="calais">Calais</option>
-    <option value="delta_rhone">Arles et du delta du Rhône</option>
-    <option value="roya_vesubie">la Roya et de la Vésubie</option>
-    <option value="boucle_marne">la boucle de la Marne</option>
-    <option value="paris">Paris</option>
-    <option value="lyon">Lyon et Villeurbanne</option>
-    <option value="marseille">Marseille et Aubagne</option>
-    <option value="toulouse">Toulouse</option>
-    <option value="bordeaux">Bordeaux</option>
-    <option value="grenoble">Grenoble</option>
-    <option value="nimes">Nîmes</option>
-    <option value="bastia">Bastia</option>
-  </select></span></h1>
-  <p class="phrase">Pour une crue <span class="choix"><select id="crue" title="Choisir la crue"></select></span>,
-  <span class="nombre" id="nombre"></span> bâtiments sur
-  <span class="nombre" id="total"></span> seraient en zone inondable, avec
-  <span class="nombre" id="logements"></span> logements,
-  <span class="nombre" id="habitants"></span> habitants en 2021 et une valeur estimée de
-  <span class="nombre" id="valeur"></span> millions d'euros.</p>
-</header>
-<main>
-  <div id="carte"></div>
-  <div class="legende grille" id="legende">
-    <span>Crue :</span>
-    <span id="batiments">Bâtiments :</span>
-    <span><i style="background: #001a6e"></i>en zone inondable</span>
-    <span><i style="background: #f4ecdc"></i>logements hors zone inondable</span>
-    <span><i style="background: #d6c3a0"></i>autres bâtiments hors zone inondable</span>
-  </div>
-  <p class="legende">Sources : IGN (CoSIA 2021-2023, LiDAR HD, BD TOPO, Admin Express), Géorisques (TRI 2020), JRC (cartes d'aléa), Insee (Filosofi), DGFiP (DVF).</p>
-</main>
+<h1>Bâtiments en zone inondable</h1>
+<p>Pour une crue <span class="choix"><select id="crue" title="Choisir la crue"></select></span>,
+<span class="batiments"><span class="nombre" id="batiments"></span> bâtiments</span>
+<span id="lieu">dans la vue</span> seraient inondés, avec
+<span class="nombre" id="habitants"></span> habitants et
+<span class="nombre" id="valeur"></span> M€ de logements.</p>
+<p><input id="adresse" type="search" list="propositions" placeholder="Chercher une adresse"
+  autocomplete="off" aria-label="Chercher une adresse"><datalist id="propositions"></datalist></p>
+<div id="carte"></div>
 <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js"></script>
 <script>
 const nombres = new Intl.NumberFormat("fr-FR");
-const territoire = new URLSearchParams(location.search).get("territoire") || "saint_omer";
-const donnees = "donnees/" + territoire + "/";
-const bleus = ["#5877c5", "#97aada", "#cad3eb"];
-const logementsHorsZone = "#f4ecdc";
-const autresHorsZone = "#d6c3a0";
 const enZone = "#001a6e";
-const crues = {
-  tri: { frequent: "fréquente", moyen: "moyenne", moyen_climat: "moyenne avec changement climatique", extreme: "extrême" },
-  jrc: { frequent: "décennale", moyen: "centennale", extreme: "de période de retour 500 ans" }
+const teinteZone = "#5877c5";
+const IGN = "https://data.geopf.fr/annexes/ressources/vectorTiles";
+const MESURES = ["batiments", "habitants", "valeur"];
+const couchesTri = {
+  tri_frequent: ["ALEA_SYNT_01_01FOR_FXX", "ALEA_SYNT_02_01FOR_FXX", "ALEA_SYNT_03_01FOR_FXX"],
+  tri_moyen: ["ALEA_SYNT_01_02MOY_FXX", "ALEA_SYNT_02_02MOY_FXX", "ALEA_SYNT_03_02MOY_FXX"],
+  tri_moyen_climat: ["ALEA_SYNT_01_03MCC_FXX", "ALEA_SYNT_03_03MCC_FXX"],
+  tri_extreme: ["ALEA_SYNT_01_04FAI_FXX", "ALEA_SYNT_02_04FAI_FXX", "ALEA_SYNT_03_04FAI_FXX"]
   };
+const periodes = { jrc_10: 10, jrc_100: 100, jrc_500: 500 };
+const classesCosia = [
+  ["#ce7079", "#efe9dd"], ["#987752", "#dde6c4"], ["#a6aab7", "#efe9dd"], ["#62d0ff", "#efe9dd"],
+  ["#bbb096", "#dde6c4"], ["#3375a1", "#b8c8d2"], ["#e9effe", "#dde6c4"], ["#126421", "#8fb877"],
+  ["#4c9129", "#8fb877"], ["#b5c335", "#c3dba6"], ["#b08290", "#dde6c4"], ["#8cd76a", "#c3dba6"],
+  ["#decf55", "#dde6c4"], ["#d0a349", "#dde6c4"], ["#b9e2d4", "#efe9dd"], ["#df8b52", "#c3dba6"],
+  ["#222222", "#efe9dd"]
+  ].map(paire => paire.map(rvb));
+const correspondances = new Map();
+const champ = document.getElementById("adresse");
+const propositions = document.getElementById("propositions");
+const liste = document.getElementById("crue");
+let resultats = [];
+let attente;
+let demande = 0;
+let synthese;
+let grille;
 
-const protocole = new pmtiles.Protocol();
-maplibregl.addProtocol("pmtiles", protocole.tile);
+function rvb(teinte) {
+  return [1, 3, 5].map(rang => parseInt(teinte.slice(rang, rang + 2), 16));
+}
 
-const carte = new maplibregl.Map({
-  container: "carte",
-  style: {
+function ecart(premiere, seconde) {
+  return (premiere[0] - seconde[0]) ** 2 + (premiere[1] - seconde[1]) ** 2 + (premiere[2] - seconde[2]) ** 2;
+}
+
+function adoucir(couleur) {
+  const cle = couleur.join(",");
+  if (!correspondances.has(cle)) {
+    const proche = classesCosia.reduce((meilleure, classe) => ecart(classe[0], couleur) < ecart(meilleure[0], couleur) ? classe : meilleure);
+    correspondances.set(cle, proche[1]);
+  }
+  return correspondances.get(cle);
+}
+
+function wmts(couche, format, jeu, style) {
+  return "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&STYLE=" + style + "&TILEMATRIXSET=" + jeu + "&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&LAYER=" + couche + "&FORMAT=" + format;
+}
+
+function wms(couches) {
+  return "https://www.georisques.gouv.fr/services?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&STYLES=&CRS=EPSG:3857&BBOX={bbox-epsg-3857}&WIDTH=256&HEIGHT=256&FORMAT=image/png&TRANSPARENT=true&LAYERS=" + couches.join(",");
+}
+
+function adresseDonnees(chemin) {
+  return "pmtiles://" + new URL("donnees/" + chemin, location.href).href;
+}
+
+async function imageCosia(z, x, y, signal) {
+  const adresse = wmts("IGNF_COSIA_2021-2023", "image/png", "PM_6_18", "normal")
+    .replace("{z}", z)
+    .replace("{x}", x)
+    .replace("{y}", y);
+  const reponse = await fetch(adresse, { signal });
+  return reponse.ok ? createImageBitmap(await reponse.blob()) : null;
+}
+
+async function dessinerCosia(contexte, z, x, y, signal) {
+  if (z >= 6) {
+    const image = await imageCosia(z, x, y, signal);
+    if (image) contexte.drawImage(image, 0, 0);
+    return;
+  }
+  for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+    const image = await imageCosia(z + 1, 2 * x + dx, 2 * y + dy, signal);
+    if (image) contexte.drawImage(image, dx * 128, dy * 128, 128, 128);
+  }
+}
+
+function recolorer(contexte) {
+  const pixels = contexte.getImageData(0, 0, 256, 256);
+  const valeurs = pixels.data;
+  for (let rang = 0; rang < valeurs.length; rang += 4) {
+    const couleur = adoucir([valeurs[rang], valeurs[rang + 1], valeurs[rang + 2]]);
+    valeurs[rang] = couleur[0];
+    valeurs[rang + 1] = couleur[1];
+    valeurs[rang + 2] = couleur[2];
+    valeurs[rang + 3] = valeurs[rang + 3] < 128 ? 0 : 255;
+  }
+  contexte.putImageData(pixels, 0, 0);
+}
+
+async function tuileCosia(parametres, controleur) {
+  const [z, x, y] = parametres.url.replace("cosia://", "").split("/").map(Number);
+  const toile = new OffscreenCanvas(256, 256);
+  const contexte = toile.getContext("2d", { willReadFrequently: true });
+  contexte.imageSmoothingEnabled = false;
+  await dessinerCosia(contexte, z, x, y, controleur.signal);
+  recolorer(contexte);
+  const fichier = await toile.convertToBlob({ type: "image/png" });
+  return { data: await fichier.arrayBuffer() };
+}
+
+function style() {
+  return {
     version: 8,
+    glyphs: IGN + "/fonts/{fontstack}/{range}.pbf",
     sources: {
-      occupation: {
-        type: "raster",
-        tiles: [donnees + "cosia/{z}/{x}/{y}.png"],
-        tileSize: 256,
-        minzoom: 9,
-        maxzoom: 16
-        },
-      estompage: {
-        type: "raster",
-        tiles: ["https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=IGNF_LIDAR-HD_MNT_ELEVATION.ELEVATIONGRIDCOVERAGE.SHADOW&STYLE=normal&TILEMATRIXSET=PM_0_18&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png"],
-        tileSize: 256,
-        maxzoom: 18
-        },
-      relief: {
-        type: "raster-dem",
-        tiles: [donnees + "relief/{z}/{x}/{y}.png"],
-        encoding: "terrarium",
-        tileSize: 256,
-        minzoom: 9,
-        maxzoom: 14
-        }
+      cosia: { type: "raster", tiles: ["cosia://{z}/{x}/{y}"], tileSize: 256, minzoom: 5, maxzoom: 18 },
+      estompage: { type: "raster", tiles: [wmts("ELEVATION.ELEVATIONGRIDCOVERAGE.SHADOW", "image/png", "PM_0_15", "estompage_grayscale")], tileSize: 256, maxzoom: 15 },
+      tri: { type: "raster", tiles: [wms(couchesTri.tri_extreme)], tileSize: 256, minzoom: 11, maxzoom: 19 },
+      eaip: { type: "raster", tiles: [wms(["MASQ_EAIP"])], tileSize: 256, minzoom: 11, maxzoom: 12 },
+      jrc: { type: "vector", url: adresseDonnees("jrc.pmtiles") },
+      batiments: { type: "vector", url: adresseDonnees("batiments.pmtiles") },
+      communes: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
+      adresse: { type: "geojson", data: { type: "FeatureCollection", features: [] } }
       },
     layers: [
       { id: "fond", type: "background", paint: { "background-color": "#b8c8d2" } },
-      { id: "occupation", type: "raster", source: "occupation" },
-      { id: "estompage", type: "raster", source: "estompage", paint: { "raster-opacity": 0.45 } }
+      { id: "cosia", type: "raster", source: "cosia" },
+      { id: "estompage", type: "raster", source: "estompage", paint: { "raster-opacity": 0.35 } },
+      { id: "tri", type: "raster", source: "tri", layout: { visibility: "none" }, paint: { "raster-hue-rotate": 75, "raster-opacity": 0.55 } },
+      { id: "eaip", type: "raster", source: "eaip", layout: { visibility: "none" }, paint: { "raster-opacity": 0.6 } },
+      { id: "jrc", type: "fill", source: "jrc", "source-layer": "jrc", minzoom: 9, layout: { visibility: "none" }, paint: { "fill-color": teinteZone, "fill-opacity": 0.3 } },
+      { id: "batiments", type: "fill", source: "batiments", "source-layer": "batiments", minzoom: 13, paint: { "fill-color": enZone } },
+      { id: "adresse", type: "fill", source: "adresse", paint: { "fill-color": "#9E1B1B" } },
+      {
+        id: "communes", type: "circle", source: "communes", maxzoom: 13,
+        paint: {
+          "circle-color": enZone,
+          "circle-opacity": ["interpolate", ["linear"], ["zoom"], 11, 0.75, 13, 0.15],
+          "circle-radius": ["interpolate", ["linear"], ["zoom"],
+            5, ["*", 0.08, ["sqrt", ["get", "b"]]],
+            9, ["*", 0.3, ["sqrt", ["get", "b"]]],
+            12, ["*", 0.6, ["sqrt", ["get", "b"]]]]
+          }
+        }
       ]
-    },
-  center: [2.255, 50.752],
-  zoom: 14.5,
-  pitch: 45,
-  bearing: -15,
-  maxPitch: 80,
-  light: { anchor: "map", position: [1.4, 210, 40], intensity: 0.35 },
+    };
+}
+
+maplibregl.addProtocol("cosia", tuileCosia);
+maplibregl.addProtocol("pmtiles", new pmtiles.Protocol().tile);
+
+const carte = new maplibregl.Map({
+  container: "carte",
+  style: style(),
+  bounds: [[-5.2, 41.3], [9.6, 51.1]],
+  minZoom: 5,
+  maxBounds: [[-12, 38], [16, 54]],
   attributionControl: false
   });
 
-function element(balise, classe, texte) {
-  const noeud = document.createElement(balise);
-  if (classe) noeud.className = classe;
-  if (texte !== undefined) noeud.textContent = texte;
+carte.addControl(new maplibregl.NavigationControl({ showCompass: false }));
+carte.addControl(new maplibregl.AttributionControl({
+  compact: true,
+  customAttribution: "IGN (CoSIA, BD TOPO, Plan IGN), Géorisques (TRI, EAIP), JRC, Insee (Filosofi 2021), DGFiP (DVF)"
+  }));
+
+function gardee(couche) {
+  return couche.type === "symbol"
+    && (couche.id.startsWith("toponyme localite importance") || couche["source-layer"] === "toponyme_hydro_lin");
+}
+
+async function ajouterToponymes() {
+  const toponymes = await fetch(IGN + "/styles/PLAN.IGN/toponymes.json").then(reponse => reponse.json());
+  Object.entries(toponymes.sources).forEach(([nom, source]) => carte.addSource(nom, source));
+  toponymes.layers
+    .filter(gardee)
+    .forEach(couche => carte.addLayer(Object.assign({}, couche, { id: "toponymes " + couche.id })));
+}
+
+async function geocoder(texte, limite) {
+  const reponse = await fetch("https://data.geopf.fr/geocodage/search?limit=" + limite + "&q=" + encodeURIComponent(texte));
+  return (await reponse.json()).features;
+}
+
+async function batiments(resultat) {
+  if (resultat.properties.type !== "housenumber") return [];
+  const reponse = await fetch("https://rnb-api.beta.gouv.fr/api/alpha/buildings/?cle_interop_ban=" + resultat.properties.id);
+  return (await reponse.json()).results
+    .filter(batiment => batiment.shape)
+    .map(batiment => ({ type: "Feature", properties: {}, geometry: batiment.shape }));
+}
+
+async function surligner(resultat) {
+  const trouves = await batiments(resultat).catch(() => []);
+  carte.getSource("adresse").setData({ type: "FeatureCollection", features: trouves });
+}
+
+function centrer(resultat) {
+  const zoom = resultat.properties.type === "municipality" ? 13 : 17;
+  carte.flyTo({ center: resultat.geometry.coordinates, zoom });
+  surligner(resultat);
+}
+
+function option(texte, valeur) {
+  const noeud = document.createElement("option");
+  noeud.textContent = texte;
+  noeud.value = valeur;
   return noeud;
 }
 
-function carre(teinte, texte) {
-  const morceau = element("span", null, texte);
-  const marque = element("i");
-  marque.style.background = teinte;
-  morceau.prepend(marque);
-  return morceau;
+async function proposer() {
+  resultats = await geocoder(champ.value, 5).catch(() => []);
+  propositions.replaceChildren(...resultats.map(resultat => option(resultat.properties.label, resultat.properties.label)));
 }
 
-function entier(valeur) {
-  return valeur == null ? "" : nombres.format(Math.round(valeur));
+function saisir() {
+  clearTimeout(attente);
+  const choisi = resultats.find(resultat => resultat.properties.label === champ.value);
+  if (choisi) centrer(choisi);
+  else if (champ.value.trim().length >= 3) attente = setTimeout(proposer, 250);
 }
 
-function valeurDe(indicateurs, ligne, groupe) {
-  const trouvee = indicateurs.tableaux.find(entree => entree.tableau === "synthese" && entree.ligne === ligne && entree.groupe === groupe);
-  return trouvee ? trouvee.valeur : null;
+async function valider(evenement) {
+  if (evenement.key !== "Enter" || champ.value.trim().length < 3) return;
+  const [premier] = await geocoder(champ.value, 1).catch(() => []);
+  if (premier) centrer(premier);
 }
 
-function compter(indicateurs, cle) {
-  document.getElementById("nombre").textContent = entier(valeurDe(indicateurs, "bâtiments", cle));
-  document.getElementById("total").textContent = entier(valeurDe(indicateurs, "bâtiments", "ensemble"));
-  document.getElementById("logements").textContent = entier(valeurDe(indicateurs, "logements", cle));
-  document.getElementById("habitants").textContent = entier(valeurDe(indicateurs, "habitants en 2021", cle));
-  document.getElementById("valeur").textContent = entier(valeurDe(indicateurs, "valeur des logements (M€)", cle));
-}
-
-function bornes(collection) {
-  const limites = new maplibregl.LngLatBounds();
-  collection.features.forEach(entite => {
-    entite.geometry.coordinates.flat(Infinity).forEach((valeur, rang, liste) => {
-      if (rang % 2 === 0) limites.extend([valeur, liste[rang + 1]]);
-    });
+function remplirListe() {
+  ["tri", "jrc", "eaip"].forEach(source => {
+    const groupe = document.createElement("optgroup");
+    groupe.label = source.toUpperCase();
+    synthese.scenarios
+      .filter(scenario => scenario.source === source)
+      .forEach(scenario => groupe.appendChild(option(scenario.libelle, scenario.cle)));
+    liste.appendChild(groupe);
   });
-  return limites;
+  liste.value = "jrc_100";
 }
 
-function elargir(limites) {
-  return [
-    [limites.getWest() - 0.08, limites.getSouth() - 0.05],
-    [limites.getEast() + 0.08, limites.getNorth() + 0.05]
-    ];
-}
-
-function ajusterLargeur(liste) {
-  const mesure = element("span", "mesure", liste.options[liste.selectedIndex].text);
+function ajusterLargeur() {
+  const mesure = document.createElement("span");
+  mesure.className = "mesure";
+  mesure.textContent = liste.options[liste.selectedIndex].text;
   liste.parentNode.appendChild(mesure);
   liste.style.width = (mesure.getBoundingClientRect().width + 26) + "px";
   mesure.remove();
 }
 
-document.getElementById("territoire").value = territoire;
-ajusterLargeur(document.getElementById("territoire"));
-document.getElementById("territoire").addEventListener("change", evenement => {
-  location.search = "?territoire=" + evenement.target.value;
-});
+function valeurCommune(commune, cle, mesure) {
+  return commune[4 + synthese.colonnes.indexOf(cle + ":" + mesure)];
+}
 
-carte.on("load", async () => {
-  const [description, indicateurs, communes] = await Promise.all([
-    fetch(donnees + "territoire.json").then(reponse => reponse.json()),
-    fetch(donnees + "indicateurs.json").then(reponse => reponse.json()),
-    fetch(donnees + "communes.geojson").then(reponse => reponse.json())
-    ]);
-
-  const cles = description.scenarios.map(scenario => scenario.cle);
-  const rare = cles.includes("extreme") ? "extreme" : cles[cles.length - 1];
-  const montres = ["frequent", "moyen", rare].filter(cle => cles.includes(cle));
-
-  const liste = document.getElementById("crue");
-  const marques = montres.map((cle, rang) => carre(bleus[rang], crues[description.source][cle]));
-  montres.forEach(cle => {
-    const option = element("option", null, crues[description.source][cle]);
-    option.value = cle;
-    option.selected = cle === rare;
-    liste.appendChild(option);
+function afficher(lieu, sommes) {
+  document.getElementById("lieu").textContent = lieu;
+  MESURES.forEach((mesure, rang) => {
+    document.getElementById(mesure).textContent = nombres.format(Math.round(sommes[rang]));
   });
-  marques.forEach(marque => document.getElementById("legende").insertBefore(marque, document.getElementById("batiments")));
+}
 
-  const teinteZone = ["match", ["get", "scenario"]];
-  const rangZone = ["match", ["get", "scenario"]];
-  montres.forEach((cle, rang) => {
-    teinteZone.push(cle, bleus[rang]);
-    rangZone.push(cle, montres.length - rang);
-  });
-  teinteZone.push(bleus[bleus.length - 1]);
-  rangZone.push(0);
+function sommeDesCarreaux(cle, limites) {
+  return grille[cle]
+    .filter(carreau => limites.contains([carreau[0], carreau[1]]))
+    .reduce((sommes, carreau) => sommes.map((somme, rang) => somme + carreau[2 + rang]), [0, 0, 0]);
+}
 
-  carte.setTerrain({ source: "relief", exaggeration: 1 });
-  carte.jumpTo({ center: indicateurs.centre });
-  carte.setMaxBounds(elargir(bornes(communes)));
-  carte.addSource("zones", { type: "vector", url: "pmtiles://" + new URL(donnees + "zones.pmtiles", location.href).href });
-  carte.addSource("batiments", { type: "vector", url: "pmtiles://" + new URL(donnees + "batiments.pmtiles", location.href).href });
-  carte.addSource("communes", { type: "geojson", data: communes });
-  carte.addLayer({
-    id: "emprises",
-    type: "fill",
-    source: "zones",
-    "source-layer": "emprises",
-    paint: { "fill-color": teinteZone },
-    layout: { "fill-sort-key": rangZone }
-    }, "estompage");
-  carte.addLayer({
-    id: "communes",
-    type: "line",
-    source: "communes",
-    paint: { "line-color": "#111", "line-width": 0.5, "line-dasharray": [3, 2] }
-    });
-  carte.addLayer({
-    id: "batiments",
-    type: "fill-extrusion",
-    source: "batiments",
-    "source-layer": "batiments",
-    minzoom: 12,
-    paint: {
-      "fill-extrusion-height": ["*", 3, ["coalesce", ["get", "hauteur"], 3]],
-      "fill-extrusion-opacity": 1
-      }
-    });
+function communeLaPlusProche(centre) {
+  const distance = commune => (commune[2] - centre.lng) ** 2 + (commune[3] - centre.lat) ** 2;
+  return synthese.communes.reduce((meilleure, commune) => distance(commune) < distance(meilleure) ? commune : meilleure);
+}
 
-  const actualiser = () => {
-    const cle = liste.value;
-    const visibles = montres.slice(0, montres.indexOf(cle) + 1);
-    ajusterLargeur(liste);
-    compter(indicateurs, cle);
-    marques.forEach((marque, rang) => {
-      marque.style.visibility = rang < visibles.length ? "visible" : "hidden";
-    });
-    carte.setFilter("emprises", ["in", ["get", "scenario"], ["literal", visibles]]);
-    carte.setPaintProperty("batiments", "fill-extrusion-color", [
-      "case",
-      ["!=", ["get", cle], null], enZone,
-      ["==", ["get", "usage_1"], "Résidentiel"], logementsHorsZone,
-      autresHorsZone
-      ]);
-  };
+async function communeAuCentre(centre) {
+  const reponse = await fetch("https://geo.api.gouv.fr/communes?fields=code&lat=" + centre.lat + "&lon=" + centre.lng).catch(() => null);
+  const trouvees = reponse && reponse.ok ? await reponse.json() : [];
+  const commune = trouvees.length > 0 ? synthese.communes.find(ligne => ligne[0] === trouvees[0].code) : undefined;
+  return commune || communeLaPlusProche(centre);
+}
 
+function vueEtroite(limites) {
+  const largeur = limites.getNorthWest().distanceTo(limites.getNorthEast());
+  const hauteur = limites.getNorthWest().distanceTo(limites.getSouthWest());
+  return Math.min(largeur, hauteur) < 3000;
+}
+
+async function compter() {
+  const cle = liste.value;
+  const limites = carte.getBounds();
+  demande = demande + 1;
+  const numero = demande;
+  if (!vueEtroite(limites)) {
+    afficher("dans la vue", sommeDesCarreaux(cle, limites));
+    return;
+  }
+  const commune = await communeAuCentre(carte.getCenter());
+  if (numero === demande) afficher("à " + commune[1], MESURES.map(mesure => valeurCommune(commune, cle, mesure)));
+}
+
+function cercles(cle) {
+  return {
+    type: "FeatureCollection",
+    features: synthese.communes
+      .filter(commune => valeurCommune(commune, cle, "batiments") > 0)
+      .map(commune => ({
+        type: "Feature",
+        properties: { b: valeurCommune(commune, cle, "batiments") },
+        geometry: { type: "Point", coordinates: [commune[2], commune[3]] }
+        }))
+    };
+}
+
+function actualiser() {
+  const cle = liste.value;
+  const source = synthese.scenarios.find(scenario => scenario.cle === cle).source;
+  ajusterLargeur();
+  ["tri", "eaip", "jrc"].forEach(couche => carte.setLayoutProperty(couche, "visibility", couche === source ? "visible" : "none"));
+  if (source === "tri") carte.getSource("tri").setTiles([wms(couchesTri[cle])]);
+  if (source === "jrc") carte.setFilter("jrc", ["==", ["get", "p"], periodes[cle]]);
+  carte.setFilter("batiments", ["has", cle]);
+  carte.getSource("communes").setData(cercles(cle));
+  compter();
+}
+
+async function demarrer() {
+  ajouterToponymes().catch(() => null);
+  synthese = await fetch("donnees/communes.json").then(reponse => reponse.json());
+  grille = await fetch("donnees/carreaux.json").then(reponse => reponse.json());
+  remplirListe();
   actualiser();
   liste.addEventListener("change", actualiser);
-});
+  carte.on("moveend", compter);
+}
+
+champ.addEventListener("input", saisir);
+champ.addEventListener("keydown", valider);
+carte.on("load", demarrer);
 </script>
 </body>
 </html>

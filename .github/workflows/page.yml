@@ -9,32 +9,102 @@ permissions:
   id-token: write
 
 jobs:
-  construire:
+  filosofi:
     runs-on: ubuntu-24.04
-    timeout-minutes: 720
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: sudo apt-get install -y tippecanoe
+          cache: pip
       - run: pip install -r requirements.txt
-      - run: |
-          for territoire in saint_omer ales aude saint_malo calais delta_rhone roya_vesubie boucle_marne paris lyon marseille toulouse bordeaux grenoble nimes bastia; do
-            python code/carte.py $territoire
-            python code/population.py $territoire
-            python code/dvf.py $territoire
-            python code/assembler.py $territoire
-            python code/mnt.py $territoire
-            python code/relief.py $territoire
-            python code/cosia.py $territoire
-          done
+      - run: python code/filosofi.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: filosofi
+          path: data/filosofi_2021.parquet
+          retention-days: 3
+
+  jrc:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python code/jrc.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jrc
+          path: data/jrc.geojsonl
+          retention-days: 3
+
+  departements:
+    needs: filosofi
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        departement: ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "2A", "2B", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "45", "46", "47", "48", "49", "50", "51", "52", "53", "54", "55", "56", "57", "58", "59", "60", "61", "62", "63", "64", "65", "66", "67", "68", "69", "70", "71", "72", "73", "74", "75", "76", "77", "78", "79", "80", "81", "82", "83", "84", "85", "86", "87", "88", "89", "90", "91", "92", "93", "94", "95"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: filosofi
+          path: data
+      - run: python code/departement.py ${{ matrix.departement }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: departement-${{ matrix.departement }}
+          path: data/departements/${{ matrix.departement }}
+          retention-days: 3
+
+  assembler:
+    needs: [departements, jrc]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: sudo apt-get update && sudo apt-get install -y tippecanoe
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: departement-*
+          path: data/departements
+      - uses: actions/download-artifact@v4
+        with:
+          name: jrc
+          path: data
+      - run: python code/assembler.py
+      - name: Vérifier la limite de 1 Go de GitHub Pages
+        run: |
+          du -sh site site/donnees/*
+          taille=$(du -sb site | cut -f1)
+          if [ "$taille" -gt 1000000000 ]; then
+            echo "::error::le site pèse $taille octets, au-delà de la limite de 1 Go de GitHub Pages"
+            exit 1
+          fi
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
 
   deployer:
-    needs: construire
+    needs: assembler
     runs-on: ubuntu-24.04
     environment:
       name: github-pages

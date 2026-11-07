@@ -6,7 +6,7 @@ target-version = "py311"
 select = ["E", "F", "W", "I", "B", "UP"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["tuiles"]
+known-first-party = ["tuiles", "commun"]
 
 [tool.pytest.ini_options]
-pythonpath = ["code"]
+pythonpath = ["code", "3D/code"]

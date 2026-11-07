@@ -1,0 +1,45 @@
+name: page-3d
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  construire:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 720
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get install -y tippecanoe
+      - run: pip install -r requirements.txt
+      - working-directory: 3D
+        run: |
+          for territoire in saint_omer ales aude saint_malo calais delta_rhone roya_vesubie boucle_marne paris lyon marseille toulouse bordeaux grenoble nimes bastia; do
+            python code/carte.py $territoire
+            python code/population.py $territoire
+            python code/dvf.py $territoire
+            python code/assembler.py $territoire
+            python code/mnt.py $territoire
+            python code/relief.py $territoire
+            python code/cosia.py $territoire
+          done
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: 3D/site
+
+  deployer:
+    needs: construire
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deploiement.outputs.page_url }}
+    steps:
+      - id: deploiement
+        uses: actions/deploy-pages@v4
