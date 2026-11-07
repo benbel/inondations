@@ -1,71 +1,48 @@
-"""Zones inondables JRC (périodes de retour 10, 100 et 500 ans) sur la France métropolitaine,
-vectorisées pour les tuiles : aucun service de tuiles ne les diffuse.
-
-python code/jrc.py
-"""
-
-import json
 from pathlib import Path
 
-import numpy as np
+import geopandas as gpd
+import pandas as pd
 import rasterio
-from rasterio.features import shapes
 from rasterio.windows import Window, from_bounds
 
-from commun import jrc
+from commun import jrc, polygones
 
 FRANCE = (-5.3, 41.3, 9.7, 51.2)
 
 BLOC = 2048
 
+
+def blocs(fenetre):
+    return [
+        Window(
+            fenetre.col_off + colonne,
+            fenetre.row_off + ligne,
+            min(BLOC, fenetre.width - colonne),
+            min(BLOC, fenetre.height - ligne),
+            )
+        for ligne in range(0, int(fenetre.height), BLOC)
+        for colonne in range(0, int(fenetre.width), BLOC)
+        ]
+
+
+def zones(periode):
+    with rasterio.open(jrc(periode)) as source:
+        fenetre = from_bounds(*FRANCE, source.transform).round_offsets().round_lengths()
+
+        morceaux = [
+            polygones(source.read(1, window=bloc) > 0, source.window_transform(bloc), 4326)
+            for bloc in blocs(fenetre)
+            ]
+
+    return gpd.GeoDataFrame(geometry=pd.concat(morceaux, ignore_index=True), crs=4326).assign(
+        p=periode
+        )
+
+
 Path("data").mkdir(exist_ok=True)
 
-nombre = 0
+toutes = pd.concat([zones(periode) for periode in (10, 100, 500)], ignore_index=True)
 
-with open("data/jrc.geojsonl", "w") as sortie:
-    for periode in (10, 100, 500):
-        with rasterio.open(jrc(periode)) as source:
-            fenetre = from_bounds(*FRANCE, source.transform).round_offsets().round_lengths()
+toutes.to_file("data/jrc.geojsonl", driver="GeoJSONSeq", COORDINATE_PRECISION=5)
 
-            for ligne in range(0, int(fenetre.height), BLOC):
-                for colonne in range(0, int(fenetre.width), BLOC):
-                    bloc = Window(
-                        fenetre.col_off + colonne,
-                        fenetre.row_off + ligne,
-                        min(BLOC, fenetre.width - colonne),
-                        min(BLOC, fenetre.height - ligne),
-                        )
-
-                    profondeurs = source.read(1, window=bloc)
-
-                    inondable = profondeurs > 0
-
-                    if not inondable.any():
-                        continue
-
-                    for geometrie, _ in shapes(
-                        inondable.astype("uint8"),
-                        mask=inondable,
-                        transform=source.window_transform(bloc),
-                        ):
-                        geometrie["coordinates"] = [
-                            np.round(anneau, 5).tolist() for anneau in geometrie["coordinates"]
-                            ]
-
-                        sortie.write(
-                            json.dumps(
-                                {
-                                    "type": "Feature",
-                                    "properties": {"p": periode},
-                                    "geometry": geometrie,
-                                    },
-                                separators=(",", ":"),
-                                )
-                            + "\n"
-                            )
-
-                        nombre = nombre + 1
-
-        print(f"période {periode} : {nombre} polygones cumulés")
-
-print("écrit data/jrc.geojsonl")
+print(f"{len(toutes)} polygones JRC")
