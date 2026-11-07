@@ -1,5 +1,6 @@
 import io
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import geopandas as gpd
 import numpy as np
@@ -11,7 +12,7 @@ from rasterio.features import shapes
 from rasterio.transform import from_origin
 from rasterio.warp import transform_bounds
 from rasterio.windows import from_bounds
-from shapely.geometry import shape
+from shapely.geometry import box, shape
 
 GEORISQUES = "https://www.georisques.gouv.fr/services"
 
@@ -92,6 +93,14 @@ def dalles(bornes, cote):
         ]
 
 
+def cellules(perimetre, cote):
+    return [
+        (gauche, bas, gauche + cote, bas + cote)
+        for gauche, bas in dalles(perimetre.bounds, cote)
+        if perimetre.intersects(box(gauche, bas, gauche + cote, bas + cote))
+        ]
+
+
 def wfs_ign(couche, parametres):
     entites = (
         obtenir(
@@ -125,7 +134,7 @@ def page_georisques(couche, bornes, depart):
             "TYPENAMES": f"ms:{couche}",
             "SRSNAME": "EPSG:2154",
             "BBOX": ",".join(str(round(borne)) for borne in bornes) + ",urn:ogc:def:crs:EPSG::2154",
-            "COUNT": 500,
+            "COUNT": 200,
             "STARTINDEX": depart,
             },
         )
@@ -149,14 +158,28 @@ def polygones(masque, transformation, crs):
         )
 
 
-def couche_georisques(couche, bornes):
-    return toutes_les_pages(lambda depart: page_georisques(couche, bornes, depart), 500)
+def cellule_georisques(couche, cellule):
+    return toutes_les_pages(lambda depart: page_georisques(couche, cellule, depart), 200)
 
 
-def zones_tri(couches, bornes):
-    return pd.concat(
-        [couche_georisques(couche, bornes) for couche in couches], ignore_index=True
-        ).geometry
+def couche_georisques(couche, perimetre):
+    with ThreadPoolExecutor(max_workers=4) as executeur:
+        morceaux = list(
+            executeur.map(
+                lambda cellule: cellule_georisques(couche, cellule), cellules(perimetre, 10000)
+                )
+            )
+
+    return pd.concat(morceaux, ignore_index=True)
+
+
+def zones_tri(couches, perimetre):
+    zones = (
+        pd.concat([couche_georisques(couche, perimetre) for couche in couches], ignore_index=True)
+        .geometry
+        )
+
+    return zones[~zones.to_wkb().duplicated()]
 
 
 def zones_jrc(periode, bornes):
@@ -209,11 +232,11 @@ def zones_eaip(bornes, resolution=26, cote=4000):
         )
 
 
-def zones(definition, bornes):
+def zones(definition, perimetre):
     if definition["source"] == "tri":
-        return zones_tri(definition["couches"], bornes)
+        return zones_tri(definition["couches"], perimetre)
 
     if definition["source"] == "jrc":
-        return zones_jrc(definition["periode"], bornes)
+        return zones_jrc(definition["periode"], perimetre.bounds)
 
-    return zones_eaip(bornes)
+    return zones_eaip(perimetre.bounds)
