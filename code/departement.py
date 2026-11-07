@@ -217,12 +217,12 @@ def ajouter_valeurs(batiments, departement):
         )
 
 
-def ajouter_expositions(batiments, perimetre):
+def ajouter_expositions(batiments, perimetre, departement):
     exposes = batiments.copy()
 
     for cle, definition in scenarios.items():
         _, touches = batiments.sindex.query(
-            zones(definition, perimetre).make_valid(), predicate="intersects"
+            zones(definition, perimetre, departement).make_valid(), predicate="intersects"
             )
 
         exposes[cle] = batiments.index.isin(touches)
@@ -293,7 +293,7 @@ batiments = (
     .pipe(ajouter_habitants, perimetre.bounds)
     .pipe(ajouter_communes, communes)
     .pipe(ajouter_valeurs, departement)
-    .pipe(ajouter_expositions, perimetre)
+    .pipe(ajouter_expositions, perimetre, departement)
     )
 
 synthese_des_communes(batiments, communes).round(2).to_csv(sortie / "communes.csv")
