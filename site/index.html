@@ -251,7 +251,8 @@ function bit(rang) {
 
 carte.on("load", async () => {
   ajouterToponymes().catch(erreur => console.warn("toponymes indisponibles", erreur));
-  const synthese = await fetch("donnees/communes.json").then(reponse => reponse.json());
+  const [synthese, grille] = await Promise.all(
+    ["communes", "carreaux"].map(nom => fetch("donnees/" + nom + ".json").then(reponse => reponse.json())));
   const colonne = (groupe, mesure) => 4 + synthese.groupes.indexOf(groupe) * synthese.mesures.length + synthese.mesures.indexOf(mesure);
 
   const liste = document.getElementById("crue");
@@ -269,23 +270,25 @@ carte.on("load", async () => {
 
   let demande = 0;
 
-  const afficher = (cle, retenues, lieu) => {
-    const somme = mesure => retenues.reduce((total, commune) => total + commune[colonne(cle, mesure)], 0);
+  const afficher = (lieu, somme) => {
     document.getElementById("lieu").textContent = lieu;
-    document.getElementById("nombre").textContent = nombres.format(Math.round(somme("batiments")));
-    document.getElementById("habitants").textContent = nombres.format(Math.round(somme("habitants")));
-    document.getElementById("valeur").textContent = nombres.format(Math.round(somme("valeur")));
+    ["batiments", "habitants", "valeur"].forEach(mesure => {
+      document.getElementById(mesure === "batiments" ? "nombre" : mesure).textContent = nombres.format(Math.round(somme(mesure)));
+    });
   };
 
-  // Les communes sont comptées par leur point central ; de près, quand aucun n'est visible,
-  // on retient la commune située au centre de la carte.
+  // On additionne les carreaux de 1 km dont le centre est à l'écran. De près, quand la vue fait
+  // moins de 3 km de côté, cette règle devient trop grossière : on donne la commune du centre.
   const compter = async () => {
     const cle = liste.value;
     const numero = ++demande;
     const limites = carte.getBounds();
-    const visibles = synthese.communes.filter(commune => limites.contains([commune[2], commune[3]]));
-    if (visibles.length > 0) {
-      afficher(cle, visibles, "dans la vue");
+    const largeur = limites.getNorthWest().distanceTo(limites.getNorthEast());
+    const hauteur = limites.getNorthWest().distanceTo(limites.getSouthWest());
+    if (Math.min(largeur, hauteur) >= 3000) {
+      const visibles = grille[cle].filter(carreau => limites.contains([carreau[0], carreau[1]]));
+      const rang = { batiments: 2, habitants: 3, valeur: 4 };
+      afficher("dans la vue", mesure => visibles.reduce((total, carreau) => total + carreau[rang[mesure]], 0));
       return;
     }
     const centre = carte.getCenter();
@@ -301,7 +304,7 @@ carte.on("load", async () => {
       const distance = ligne => (ligne[2] - centre.lng) ** 2 + (ligne[3] - centre.lat) ** 2;
       commune = synthese.communes.reduce((meilleure, ligne) => distance(ligne) < distance(meilleure) ? ligne : meilleure);
     }
-    if (numero === demande) afficher(cle, [commune], "à " + commune[1]);
+    if (numero === demande) afficher("à " + commune[1], mesure => commune[colonne(cle, mesure)]);
   };
 
   const actualiser = () => {

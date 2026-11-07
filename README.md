@@ -39,4 +39,7 @@ Il échoue si le site dépasse 1 Go, la limite de GitHub Pages.
   sinon du département. DVF ne couvre pas la Moselle, le Bas-Rhin et le Haut-Rhin : la
   valeur y est nulle.
 
+- Phrase sous le titre : somme des carreaux de 1 km (Lambert-93) dont le centre est à
+  l'écran ; quand la vue fait moins de 3 km de côté, totaux de la commune au centre.
+
 La première version, en 3D sur seize territoires, est archivée dans `3D/`.

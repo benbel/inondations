@@ -346,6 +346,29 @@ synthese = (
 
 synthese.round(2).to_csv(sortie / "communes.csv")
 
+# Même synthèse sur une grille de 1 km (Lambert-93), pour compter ce qui est à l'écran ;
+# seuls les carreaux ayant au moins un bâtiment exposé sont gardés.
+centres_batiments = batiments.centroid
+
+carreaux = (
+    pd.DataFrame(
+        {
+            colonne: valeurs_colonne
+            for colonne, valeurs_colonne in colonnes.items()
+            if not colonne.startswith("ensemble:") and not colonne.endswith(":logements")
+            }
+        )
+    .assign(
+        x=(centres_batiments.x // 1000).astype(int),
+        y=(centres_batiments.y // 1000).astype(int),
+        )
+    .loc[batiments["z"] > 0]
+    .groupby(["x", "y"])
+    .sum()
+    )
+
+carreaux.round(2).to_csv(sortie / "carreaux.csv")
+
 (
     batiments
     .loc[batiments["z"] > 0, ["z", "geometry"]]

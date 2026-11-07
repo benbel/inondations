@@ -8,7 +8,9 @@ import json
 import subprocess
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+from pyproj import Transformer
 
 from commun import scenarios
 
@@ -109,6 +111,41 @@ for rang, commune in communes.iterrows():
         separators=(",", ":"),
         )
     )
+
+carreaux = (
+    pd.concat(
+        [pd.read_csv(dossier.parent / "carreaux.csv") for dossier in dossiers], ignore_index=True
+        )
+    .groupby(["x", "y"], as_index=False)
+    .sum()
+    )
+
+longitudes, latitudes = map(np.asarray, Transformer.from_crs(2154, 4326, always_xy=True).transform(
+    carreaux["x"] * 1000 + 500, carreaux["y"] * 1000 + 500
+    ))
+
+# Par scénario, seuls les carreaux touchés : [longitude, latitude, bâtiments, habitants, M€].
+grille = {}
+
+for cle in scenarios:
+    touches = carreaux[f"{cle}:batiments"] > 0
+
+    grille[cle] = [
+        [round(longitude, 3), round(latitude, 3), int(round(batiments)), int(round(habitants)),
+         round(valeur, 1)]
+        for longitude, latitude, batiments, habitants, valeur in zip(
+            longitudes[touches],
+            latitudes[touches],
+            carreaux.loc[touches, f"{cle}:batiments"],
+            carreaux.loc[touches, f"{cle}:habitants"],
+            carreaux.loc[touches, f"{cle}:valeur"],
+            strict=True,
+            )
+        ]
+
+(sortie / "carreaux.json").write_text(json.dumps(grille, separators=(",", ":")))
+
+print(f"{len(carreaux)} carreaux de 1 km")
 
 total = communes[colonnes].sum()
 
