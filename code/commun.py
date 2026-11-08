@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import rasterio
 import requests
+import shapely
 from PIL import Image
 from rasterio.features import shapes
 from rasterio.transform import from_origin
@@ -224,6 +225,32 @@ def zones_eaip(bornes, resolution=26, cote=4000):
             for gauche, bas in dalles(bornes, resolution * cote)
             ],
         ignore_index=True,
+        )
+
+
+def subdiviser(geometrie, plafond=256):
+    gauche, bas, droite, haut = geometrie.bounds
+
+    if shapely.get_num_coordinates(geometrie) <= plafond or max(droite - gauche, haut - bas) < 1:
+        return [geometrie]
+
+    x = (gauche + droite) / 2
+
+    y = (bas + haut) / 2
+
+    quarts = [(gauche, bas, x, y), (x, bas, droite, y), (gauche, y, x, haut), (x, y, droite, haut)]
+
+    return [
+        morceau
+        for quart in quarts
+        for morceau in subdiviser(shapely.intersection(geometrie, shapely.box(*quart)), plafond)
+        if not morceau.is_empty
+        ]
+
+
+def morceler(zones):
+    return gpd.GeoSeries(
+        [morceau for zone in zones.make_valid() for morceau in subdiviser(zone)], crs=2154
         )
 
 
