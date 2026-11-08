@@ -9,7 +9,7 @@ import pandas as pd
 from rasterio.warp import transform_bounds
 from shapely.geometry import box
 
-from commun import MESURES, cellules, scenarios, toutes_les_pages, wfs_ign, zones
+from commun import MESURES, cellules, morceler, scenarios, toutes_les_pages, wfs_ign, zones
 
 PROPRIETES = "cleabs,usage_1,etat_de_l_objet,nombre_de_logements,nombre_d_etages,hauteur,geometrie"
 
@@ -222,7 +222,7 @@ def ajouter_expositions(batiments, perimetre, departement):
 
     for cle, definition in scenarios.items():
         _, touches = batiments.sindex.query(
-            zones(definition, perimetre, departement).make_valid(), predicate="intersects"
+            morceler(zones(definition, perimetre, departement)), predicate="intersects"
             )
 
         exposes[cle] = batiments.index.isin(touches)
