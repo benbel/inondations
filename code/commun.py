@@ -1,5 +1,9 @@
 import io
+import re
 import time
+import zipfile
+from functools import cache
+from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
@@ -11,9 +15,11 @@ from rasterio.features import shapes
 from rasterio.transform import from_origin
 from rasterio.warp import transform_bounds
 from rasterio.windows import from_bounds
-from shapely.geometry import shape
+from shapely.geometry import box, shape
 
 GEORISQUES = "https://www.georisques.gouv.fr/services"
+
+TRI = "https://files.georisques.fr/di_2020/tri_2020_sig_di_{}.zip"
 
 MESURES = ["batiments", "habitants", "valeur"]
 
@@ -21,22 +27,22 @@ scenarios = {
     "tri_frequent": {
         "source": "tri",
         "libelle": "fréquente (TRI)",
-        "couches": ["ALEA_SYNT_01_01FOR_FXX", "ALEA_SYNT_02_01FOR_FXX", "ALEA_SYNT_03_01FOR_FXX"],
+        "code": "01for",
         },
     "tri_moyen": {
         "source": "tri",
         "libelle": "moyenne (TRI)",
-        "couches": ["ALEA_SYNT_01_02MOY_FXX", "ALEA_SYNT_02_02MOY_FXX", "ALEA_SYNT_03_02MOY_FXX"],
+        "code": "02moy",
         },
     "tri_moyen_climat": {
         "source": "tri",
         "libelle": "moyenne + climat (TRI)",
-        "couches": ["ALEA_SYNT_01_03MCC_FXX", "ALEA_SYNT_03_03MCC_FXX"],
+        "code": "03mcc",
         },
     "tri_extreme": {
         "source": "tri",
         "libelle": "extrême (TRI)",
-        "couches": ["ALEA_SYNT_01_04FAI_FXX", "ALEA_SYNT_02_04FAI_FXX", "ALEA_SYNT_03_04FAI_FXX"],
+        "code": "04fai",
         },
     "jrc_10": {"source": "jrc", "libelle": "décennale (JRC)", "periode": 10},
     "jrc_100": {"source": "jrc", "libelle": "centennale (JRC)", "periode": 100},
@@ -57,7 +63,7 @@ def obtenir(url, parametres):
         try:
             reponse = requests.get(url, params=parametres, timeout=300)
 
-            if reponse.ok:
+            if reponse.ok or reponse.status_code == 404:
                 return reponse
         except requests.RequestException:
             if essai == 5:
@@ -92,6 +98,14 @@ def dalles(bornes, cote):
         ]
 
 
+def cellules(perimetre, cote):
+    return [
+        (gauche, bas, gauche + cote, bas + cote)
+        for gauche, bas in dalles(perimetre.bounds, cote)
+        if perimetre.intersects(box(gauche, bas, gauche + cote, bas + cote))
+        ]
+
+
 def wfs_ign(couche, parametres):
     entites = (
         obtenir(
@@ -115,28 +129,6 @@ def wfs_ign(couche, parametres):
     return gpd.GeoDataFrame.from_features(entites, crs=2154)
 
 
-def page_georisques(couche, bornes, depart):
-    reponse = obtenir(
-        GEORISQUES,
-        {
-            "SERVICE": "WFS",
-            "VERSION": "2.0.0",
-            "REQUEST": "GetFeature",
-            "TYPENAMES": f"ms:{couche}",
-            "SRSNAME": "EPSG:2154",
-            "BBOX": ",".join(str(round(borne)) for borne in bornes) + ",urn:ogc:def:crs:EPSG::2154",
-            "COUNT": 500,
-            "STARTINDEX": depart,
-            },
-        )
-
-    return (
-        gpd.read_file(io.BytesIO(reponse.content))
-        .set_crs(2154, allow_override=True)
-        [["geometry"]]
-        )
-
-
 def polygones(masque, transformation, crs):
     return gpd.GeoSeries(
         [
@@ -149,14 +141,40 @@ def polygones(masque, transformation, crs):
         )
 
 
-def couche_georisques(couche, bornes):
-    return toutes_les_pages(lambda depart: page_georisques(couche, bornes, depart), 500)
+@cache
+def archive_tri(departement):
+    reponse = obtenir(TRI.format(departement), {})
+
+    if reponse.status_code == 404:
+        return None
+
+    chemin = Path(f"data/tri_{departement}.zip")
+
+    chemin.write_bytes(reponse.content)
+
+    return chemin
 
 
-def zones_tri(couches, bornes):
-    return pd.concat(
-        [couche_georisques(couche, bornes) for couche in couches], ignore_index=True
-        ).geometry
+def couches_tri(archive, code):
+    if archive is None:
+        return []
+
+    return [
+        membre
+        for membre in zipfile.ZipFile(archive).namelist()
+        if re.search(rf"_inondable_\d\d_{code}_s_\w+\.shp$", membre)
+        ]
+
+
+def zones_tri(code, departement):
+    archive = archive_tri(departement)
+
+    morceaux = [
+        gpd.read_file(f"/vsizip/{archive}/{membre}").to_crs(2154).geometry
+        for membre in couches_tri(archive, code)
+        ]
+
+    return pd.concat([gpd.GeoSeries(crs=2154), *morceaux], ignore_index=True)
 
 
 def zones_jrc(periode, bornes):
@@ -209,11 +227,11 @@ def zones_eaip(bornes, resolution=26, cote=4000):
         )
 
 
-def zones(definition, bornes):
+def zones(definition, perimetre, departement):
     if definition["source"] == "tri":
-        return zones_tri(definition["couches"], bornes)
+        return zones_tri(definition["code"], departement)
 
     if definition["source"] == "jrc":
-        return zones_jrc(definition["periode"], bornes)
+        return zones_jrc(definition["periode"], perimetre.bounds)
 
-    return zones_eaip(bornes)
+    return zones_eaip(perimetre.bounds)

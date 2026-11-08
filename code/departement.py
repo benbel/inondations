@@ -9,7 +9,7 @@ import pandas as pd
 from rasterio.warp import transform_bounds
 from shapely.geometry import box
 
-from commun import MESURES, dalles, scenarios, toutes_les_pages, wfs_ign, zones
+from commun import MESURES, cellules, scenarios, toutes_les_pages, wfs_ign, zones
 
 PROPRIETES = "cleabs,usage_1,etat_de_l_objet,nombre_de_logements,nombre_d_etages,hauteur,geometrie"
 
@@ -44,15 +44,9 @@ def batiments_de_la_cellule(cellule):
     return toutes_les_pages(lambda depart: page_batiments(cellule, depart), 5000)
 
 
-def lire_batiments(perimetre, cote=5000):
-    cellules = [
-        (gauche, bas, gauche + cote, bas + cote)
-        for gauche, bas in dalles(perimetre.bounds, cote)
-        if perimetre.intersects(box(gauche, bas, gauche + cote, bas + cote))
-        ]
-
+def lire_batiments(perimetre):
     with ThreadPoolExecutor(max_workers=8) as executeur:
-        morceaux = list(executeur.map(batiments_de_la_cellule, cellules))
+        morceaux = list(executeur.map(batiments_de_la_cellule, cellules(perimetre, 5000)))
 
     return (
         gpd.GeoDataFrame(pd.concat(morceaux, ignore_index=True), geometry="geometry", crs=2154)
@@ -223,12 +217,12 @@ def ajouter_valeurs(batiments, departement):
         )
 
 
-def ajouter_expositions(batiments, bornes):
+def ajouter_expositions(batiments, perimetre, departement):
     exposes = batiments.copy()
 
     for cle, definition in scenarios.items():
         _, touches = batiments.sindex.query(
-            zones(definition, bornes).make_valid(), predicate="intersects"
+            zones(definition, perimetre, departement).make_valid(), predicate="intersects"
             )
 
         exposes[cle] = batiments.index.isin(touches)
@@ -299,7 +293,7 @@ batiments = (
     .pipe(ajouter_habitants, perimetre.bounds)
     .pipe(ajouter_communes, communes)
     .pipe(ajouter_valeurs, departement)
-    .pipe(ajouter_expositions, perimetre.bounds)
+    .pipe(ajouter_expositions, perimetre, departement)
     )
 
 synthese_des_communes(batiments, communes).round(2).to_csv(sortie / "communes.csv")
